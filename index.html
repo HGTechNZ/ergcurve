@@ -1,0 +1,1193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<meta name="theme-color" content="#0f1720">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>ErgCurve – PM5 force curve logger</title>
+<style>
+  :root {
+    --bg:#0f1720; --panel:#17212c; --panel2:#1e2a37; --line:#2b3a4a;
+    --text:#e8eef4; --muted:#8a9bb0; --accent:#3ba3ff; --accent2:#ff9f43;
+    --good:#2ecc71; --bad:#ff5c5c;
+  }
+  * { box-sizing:border-box; }
+  html,body { margin:0; background:var(--bg); color:var(--text);
+    font:15px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
+  header { display:flex; align-items:center; justify-content:space-between;
+    padding:12px 14px; background:var(--panel); border-bottom:1px solid var(--line);
+    position:sticky; top:0; z-index:5; }
+  header h1 { font-size:17px; margin:0; letter-spacing:.3px; }
+  #status { font-size:12px; color:var(--muted); display:flex; align-items:center; gap:6px; }
+  .dot { width:9px; height:9px; border-radius:50%; background:var(--bad); display:inline-block; }
+  .dot.on { background:var(--good); }
+  .dot.rec { background:var(--accent2); animation:blink 1s infinite; }
+  @keyframes blink { 50% { opacity:.3; } }
+  nav { display:flex; background:var(--panel); border-bottom:1px solid var(--line); }
+  nav button { flex:1; background:none; border:0; color:var(--muted); padding:11px;
+    font-size:14px; border-bottom:2px solid transparent; }
+  nav button.active { color:var(--text); border-bottom-color:var(--accent); }
+  main { padding:12px; max-width:900px; margin:0 auto; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; }
+  .btn { background:var(--panel2); color:var(--text); border:1px solid var(--line);
+    border-radius:10px; padding:11px 14px; font-size:15px; cursor:pointer; }
+  .btn.primary { background:var(--accent); border-color:var(--accent); color:#04121f; font-weight:600; }
+  .btn.warn { background:var(--accent2); border-color:var(--accent2); color:#1f1204; font-weight:600; }
+  .btn.danger { color:var(--bad); }
+  .btn.small { padding:7px 10px; font-size:13px; }
+  .btn:disabled { opacity:.4; }
+  .grow { flex:1; }
+  .tiles { display:grid; grid-template-columns:repeat(4,1fr); gap:6px; margin:12px 0; }
+  .tile { background:var(--panel); border:1px solid var(--line); border-radius:10px;
+    padding:8px 6px; text-align:center; }
+  .tile .v { font-size:21px; font-weight:650; font-variant-numeric:tabular-nums; }
+  .tile .l { font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.4px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:12px;
+    padding:12px; margin:10px 0; }
+  .card h3 { margin:0 0 8px; font-size:14px; color:var(--muted); font-weight:600;
+    text-transform:uppercase; letter-spacing:.5px; }
+  canvas { width:100%; display:block; background:var(--panel2); border-radius:8px; }
+  .note { font-size:12.5px; color:var(--muted); }
+  .warnbox { background:#3a2410; border:1px solid #7a4a1a; color:#ffd2a1; border-radius:10px;
+    padding:10px 12px; font-size:13.5px; margin:10px 0; }
+  .sess { display:flex; justify-content:space-between; align-items:center; padding:11px 4px;
+    border-bottom:1px solid var(--line); cursor:pointer; }
+  .sess:last-child { border-bottom:0; }
+  .sess .t { font-weight:600; }
+  .sess .m { font-size:12.5px; color:var(--muted); }
+  .chev { color:var(--muted); font-size:20px; }
+  table { width:100%; border-collapse:collapse; font-size:13.5px; font-variant-numeric:tabular-nums; }
+  td { padding:5px 4px; border-bottom:1px solid var(--line); }
+  td:last-child { text-align:right; font-weight:600; }
+  input[type=text], textarea, select, input[type=number] {
+    background:var(--panel2); color:var(--text); border:1px solid var(--line);
+    border-radius:8px; padding:9px; font-size:15px; width:100%; font-family:inherit; }
+  textarea { min-height:60px; }
+  label.f { display:block; font-size:12px; color:var(--muted); margin:8px 0 3px; }
+  .legend { display:flex; gap:12px; flex-wrap:wrap; font-size:12px; color:var(--muted); margin-top:6px; }
+  .legend i { display:inline-block; width:14px; height:3px; vertical-align:middle; margin-right:4px; }
+  .hidden { display:none !important; }
+  #log { font:11px/1.35 ui-monospace,Menlo,monospace; color:var(--muted); white-space:pre-wrap;
+    max-height:180px; overflow:auto; }
+  .seg { display:flex; gap:4px; flex-wrap:wrap; margin-bottom:8px; }
+  .seg button { background:var(--panel2); border:1px solid var(--line); color:var(--muted);
+    border-radius:16px; padding:5px 10px; font-size:12.5px; }
+  .seg button.active { color:#04121f; background:var(--accent); border-color:var(--accent); }
+  #toast { position:fixed; left:50%; bottom:18px; transform:translateX(-50%);
+    background:#000c; color:#fff; padding:9px 14px; border-radius:20px; font-size:13.5px;
+    opacity:0; transition:opacity .25s; pointer-events:none; z-index:20; }
+  #toast.show { opacity:1; }
+  #modal { position:fixed; inset:0; background:#0009; display:flex; align-items:center;
+    justify-content:center; z-index:30; padding:20px; }
+  #modal .box { background:var(--panel); border:1px solid var(--line); border-radius:14px;
+    padding:16px; max-width:380px; width:100%; }
+</style>
+</head>
+<body>
+<header>
+  <h1>ErgCurve</h1>
+  <div id="status"><span id="dot" class="dot"></span><span id="statusText">Not connected</span></div>
+</header>
+<nav>
+  <button id="tabLive" class="active">Live</button>
+  <button id="tabSessions">Sessions</button>
+  <button id="tabMore">Backup & info</button>
+</nav>
+
+<main>
+<!-- ===================== LIVE ===================== -->
+<section id="viewLive">
+  <div id="noBt" class="warnbox hidden"></div>
+  <div class="row">
+    <button id="btnConnect" class="btn primary grow">Connect PM5</button>
+    <button id="btnDemo" class="btn">Demo</button>
+  </div>
+  <div class="row" style="margin-top:8px">
+    <button id="btnRecord" class="btn warn grow hidden">● Start recording</button>
+    <button id="btnFinish" class="btn warn grow hidden">Finish &amp; save session</button>
+  </div>
+  <p class="note" id="recNote">Connect to the PM5 to begin.</p>
+
+  <div class="tiles">
+    <div class="tile"><div class="v" id="tSplit">–</div><div class="l">/500m</div></div>
+    <div class="tile"><div class="v" id="tRate">–</div><div class="l">spm</div></div>
+    <div class="tile"><div class="v" id="tWatts">–</div><div class="l">watts</div></div>
+    <div class="tile"><div class="v" id="tPeak">–</div><div class="l">peak N</div></div>
+    <div class="tile"><div class="v" id="tTime">–</div><div class="l">time</div></div>
+    <div class="tile"><div class="v" id="tDist">–</div><div class="l">metres</div></div>
+    <div class="tile"><div class="v" id="tStrokes">–</div><div class="l">strokes</div></div>
+    <div class="tile"><div class="v" id="tDrive">–</div><div class="l">drive m</div></div>
+  </div>
+
+  <div class="card">
+    <h3>Force curve</h3>
+    <canvas id="cLive" height="230"></canvas>
+    <div class="legend">
+      <span><i style="background:var(--accent)"></i>this stroke</span>
+      <span><i style="background:#8a9bb0"></i>last 5</span>
+      <span><i style="background:var(--accent2)"></i>session average</span>
+    </div>
+  </div>
+  <div class="card">
+    <h3>Peak force &amp; peak position, this session</h3>
+    <canvas id="cLiveTrend" height="150"></canvas>
+    <div class="legend">
+      <span><i style="background:var(--accent)"></i>peak force (N)</span>
+      <span><i style="background:var(--accent2)"></i>peak position (% of drive)</span>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== SESSIONS ===================== -->
+<section id="viewSessions" class="hidden">
+  <div id="sessList" class="card"></div>
+</section>
+
+<!-- ===================== SESSION DETAIL ===================== -->
+<section id="viewDetail" class="hidden">
+  <div class="row"><button id="btnBack" class="btn small">‹ Sessions</button></div>
+  <div class="card">
+    <label class="f">Name</label>
+    <input type="text" id="dName" placeholder="e.g. 3x10' UT1 r20">
+    <label class="f">Notes</label>
+    <textarea id="dNotes" placeholder="How it felt, technique focus, damper..."></textarea>
+    <div class="note" id="dWhen" style="margin-top:6px"></div>
+  </div>
+
+  <div class="card">
+    <h3>Filter strokes</h3>
+    <div class="seg" id="segPart"></div>
+    <div class="row">
+      <div class="grow"><label class="f">Min rate (spm)</label><input type="number" id="fMin" inputmode="numeric" placeholder="any"></div>
+      <div class="grow"><label class="f">Max rate (spm)</label><input type="number" id="fMax" inputmode="numeric" placeholder="any"></div>
+    </div>
+    <div class="row">
+      <div class="grow"><label class="f">From stroke #</label><input type="number" id="fFrom" inputmode="numeric" placeholder="first"></div>
+      <div class="grow"><label class="f">To stroke #</label><input type="number" id="fTo" inputmode="numeric" placeholder="last"></div>
+      <div class="grow"><label class="f">Min drive length (m)</label><input type="number" id="fLen" inputmode="decimal" step="0.05" placeholder="any"></div>
+    </div>
+    <p class="note">Stroke # counts from the start of this recording. Min drive length removes short drill strokes (arms only, half slide…), e.g. 1.2.</p>
+    <p class="note" id="fInfo"></p>
+  </div>
+
+  <div class="card"><h3>Summary</h3><table id="dSummary"></table></div>
+
+  <div class="card">
+    <h3>Average curve ± 1 SD</h3>
+    <canvas id="cAvg" height="230"></canvas>
+    <div class="legend">
+      <span><i style="background:var(--accent)"></i>average</span>
+      <span><i style="background:#3ba3ff55;height:8px"></i>±1 SD (consistency)</span>
+      <span id="cmpLegend" class="hidden"><i style="background:var(--accent2)"></i>compare session</span>
+    </div>
+    <label class="f">Compare with another session</label>
+    <select id="dCompare"></select>
+    <p class="note">X axis is % of the drive, so strokes of different length line up.</p>
+  </div>
+
+  <div class="card">
+    <h3>Curve shape through the session</h3>
+    <canvas id="cQuart" height="200"></canvas>
+    <div class="legend" id="quartLegend"></div>
+    <p class="note">Average curve for each quarter of the filtered strokes. Look for the peak dropping or shifting as you tire.</p>
+  </div>
+
+  <div class="card">
+    <h3>Stroke by stroke</h3>
+    <div class="seg" id="segMetric"></div>
+    <canvas id="cMetric" height="170"></canvas>
+  </div>
+
+  <div class="card">
+    <h3>Single stroke</h3>
+    <input type="range" id="strokeSlider" min="0" max="0" value="0" style="width:100%">
+    <div class="note" id="strokeInfo"></div>
+    <canvas id="cStroke" height="200"></canvas>
+  </div>
+
+  <div class="card">
+    <h3>Export</h3>
+    <div class="row">
+      <button id="btnCsv" class="btn grow">CSV (strokes + curves)</button>
+      <button id="btnJson" class="btn grow">JSON</button>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <button id="btnDelete" class="btn danger grow">Delete session</button>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== MORE ===================== -->
+<section id="viewMore" class="hidden">
+  <div class="card">
+    <h3>Backup</h3>
+    <p class="note">Sessions live in this browser's storage on this phone. Export a backup now and then (to Google Drive, iCloud, email…). Clearing browser data deletes them.</p>
+    <div class="row">
+      <button id="btnBackup" class="btn grow">Export all sessions</button>
+      <label class="btn grow" style="text-align:center">Import backup
+        <input type="file" id="fileImport" accept=".json,application/json" class="hidden"></label>
+    </div>
+    <label class="f">…or paste a copied backup / session here</label>
+    <textarea id="pasteImport" placeholder="Paste copied data, then tap Import pasted"></textarea>
+    <div class="row" style="margin-top:6px"><button id="btnPasteImport" class="btn grow">Import pasted</button></div>
+    <p class="note" id="storageNote"></p>
+  </div>
+  <div class="card">
+    <h3>Units</h3>
+    <p class="note">The PM5 reports force in pounds; ErgCurve converts to newtons (× 4.448). Raw values are kept in the saved data, so nothing is lost if the scale ever needs correcting.</p>
+    <label class="f">Units on charts</label>
+    <select id="unitSel"><option value="N">Newtons</option><option value="lb">Pounds</option></select>
+  </div>
+  <div class="card">
+    <h3>Recording</h3>
+    <label style="display:flex;gap:10px;align-items:center"><input type="checkbox" id="autoRec" style="width:22px;height:22px">
+      <span>Start recording automatically on the first stroke after connecting</span></label>
+    <p class="note">Off (default): you tap <b>Start recording</b> after your warm-up, so warm-up and drills never touch your averages.</p>
+  </div>
+  <div class="card">
+    <h3>Connection log</h3>
+    <div id="log"></div>
+  </div>
+  <div class="card">
+    <h3>About</h3>
+    <p class="note">Needs a PM5 with the green Concept2 logo on recent firmware. Only one app can be connected to the PM5 at a time, so close ErgData first. Android: use Chrome. iPhone: use the Bluefy browser (Safari and Chrome on iOS have no Web Bluetooth).</p>
+  </div>
+</section>
+</main>
+
+<div id="toast"></div>
+<div id="modal" class="hidden"><div class="box"><div id="modalText"></div>
+  <div class="row" style="margin-top:14px;justify-content:flex-end">
+    <button id="modalNo" class="btn small">Cancel</button>
+    <button id="modalYes" class="btn small primary">OK</button></div></div></div>
+
+<script>
+"use strict";
+/* =====================================================================
+   PM5 Bluetooth definitions (Concept2 PM5 Bluetooth Smart Interface)
+   ===================================================================== */
+const U = id => `ce06${id}-43e5-11e4-916c-0800200c9a66`;
+const SVC = { discovery:U('0000'), info:U('0010'), control:U('0020'), rowing:U('0030') };
+const CH = {
+  serial:U('0012'), hw:U('0013'), fw:U('0014'),
+  ctrlTx:U('0021'), ctrlRx:U('0022'),
+  general:U('0031'), additional:U('0032'), additional2:U('0033'), sampleRate:U('0034'),
+  stroke:U('0035'), addStroke:U('0036'), forceCurve:U('003d'),
+};
+const LB_TO_N = 4.44822;
+const CURVE_PTS = 50;          // resample length for analysis
+const IDLE_END_MS = 5 * 60e3;  // auto-finish a session after 5 min without strokes
+
+/* =====================================================================
+   Small helpers
+   ===================================================================== */
+const $ = id => document.getElementById(id);
+const u8 = dv => new Uint8Array(dv.buffer, dv.byteOffset, dv.byteLength);
+const le16 = (v,o) => v[o] | (v[o+1] << 8);
+const le24 = (v,o) => v[o] | (v[o+1] << 8) | (v[o+2] << 16);
+function fmtTime(s) {
+  if (s == null || isNaN(s)) return '–';
+  const h = Math.floor(s/3600), m = Math.floor(s/60)%60, sec = s%60;
+  return (h ? h + ':' + String(m).padStart(2,'0') : m) + ':' + (h ? String(Math.floor(sec)).padStart(2,'0') : sec.toFixed(0).padStart(2,'0'));
+}
+function fmtSplit(s) {
+  if (!s || s <= 0 || s > 600) return '–';
+  const m = Math.floor(s/60), sec = s - m*60;
+  return m + ':' + sec.toFixed(1).padStart(4,'0');
+}
+/* Time and distance actually covered by a list of strokes, robust to recording
+   starting mid-row and to the PM5 resetting for a new piece */
+function covered(strokes) {
+  let t = 0, d = 0;
+  for (let i = 0; i < strokes.length; i++) {
+    const a = strokes[i - 1], b = strokes[i];
+    if (!a) { t += (b.driveTime || 0) + (b.recTime || 0); d += b.strokeDist || 0; continue; }
+    const dt = b.time - a.time, dd = b.dist - a.dist;
+    t += dt >= 0 && dt < 30 ? dt : (b.driveTime || 0) + (b.recTime || 0);
+    d += dd >= 0 && dd < 50 ? dd : b.strokeDist || 0;
+  }
+  return { t, d };
+}
+const mean = a => a.length ? a.reduce((x,y)=>x+y,0)/a.length : NaN;
+const sd = a => { if (a.length < 2) return 0; const m = mean(a); return Math.sqrt(mean(a.map(x=>(x-m)**2))); };
+function toast(msg) { const t = $('toast'); t.textContent = msg; t.classList.add('show');
+  clearTimeout(toast._h); toast._h = setTimeout(()=>t.classList.remove('show'), 2200); }
+function log(msg) { const l = $('log'); const ts = new Date().toLocaleTimeString();
+  l.textContent = `[${ts}] ${msg}\n` + l.textContent.slice(0, 8000); console.log(msg); }
+function confirmBox(text) {
+  return new Promise(res => {
+    $('modalText').textContent = text; $('modal').classList.remove('hidden');
+    const done = v => { $('modal').classList.add('hidden'); res(v); };
+    $('modalYes').onclick = () => done(true); $('modalNo').onclick = () => done(false);
+  });
+}
+let units = 'N';
+try { units = localStorage.getItem('ergcurve-units') || 'N'; } catch(e) {}
+const fConv = lb => units === 'N' ? lb * LB_TO_N : lb;   // convert pounds -> chart units
+const uLabel = () => units === 'N' ? 'N' : 'lb';
+
+/* Resample a raw curve to n points spanning 0..100% of the drive */
+function resample(arr, n = CURVE_PTS) {
+  if (!arr || arr.length < 2) return null;
+  const out = new Array(n);
+  for (let i = 0; i < n; i++) {
+    const x = i * (arr.length - 1) / (n - 1), j = Math.floor(x), f = x - j;
+    out[i] = j + 1 < arr.length ? arr[j]*(1-f) + arr[j+1]*f : arr[j];
+  }
+  return out;
+}
+/* Shape metrics from a raw curve (values in pounds) */
+function curveMetrics(raw) {
+  if (!raw || raw.length < 3) return {};
+  let pk = 0, pi = 0;
+  raw.forEach((v,i) => { if (v > pk) { pk = v; pi = i; } });
+  const avg = mean(raw);
+  return { cPeak: pk, cAvg: avg, peakPos: 100 * pi / (raw.length - 1),
+           ratio: pk ? avg / pk : 0, nPts: raw.length };
+}
+
+/* =====================================================================
+   Storage (IndexedDB)
+   ===================================================================== */
+const DB = {
+  db: null,
+  open() {
+    return new Promise((res, rej) => {
+      let r;
+      try { r = indexedDB.open('ergcurve', 1); } catch (e) { return rej(e); }
+      r.onupgradeneeded = () => r.result.createObjectStore('sessions', { keyPath: 'id' });
+      r.onsuccess = () => { this.db = r.result; res(); };
+      r.onerror = () => rej(r.error);
+    });
+  },
+  tx(mode) { return this.db.transaction('sessions', mode).objectStore('sessions'); },
+  put(s) { return new Promise((res, rej) => { const r = this.tx('readwrite').put(s); r.onsuccess = res; r.onerror = () => rej(r.error); }); },
+  del(id) { return new Promise((res, rej) => { const r = this.tx('readwrite').delete(id); r.onsuccess = res; r.onerror = () => rej(r.error); }); },
+  all() { return new Promise((res, rej) => { const r = this.tx('readonly').getAll(); r.onsuccess = () => res(r.result || []); r.onerror = () => rej(r.error); }); },
+  get(id) { return new Promise((res, rej) => { const r = this.tx('readonly').get(id); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); },
+};
+
+/* =====================================================================
+   Live state & session recording
+   ===================================================================== */
+const live = {
+  general: {}, add: {}, add2: {}, addStroke: {},
+  strokes: [],               // strokes in the current session
+  pendingCurve: null,        // {raw, t} force curve waiting for its stroke record
+  lastStrokeCount: -1,
+};
+let session = null;          // the session being recorded
+let saveTimer = null, idleTimer = null;
+
+let autoRecord = false;
+try { autoRecord = localStorage.getItem('ergcurve-autorec') === '1'; } catch (e) {}
+const preview = [];           // strokes seen while NOT recording (warm-up): shown live, never saved
+live.strokes = preview;
+
+function startRecording() {
+  if (session) return;
+  const now = Date.now();
+  session = { id: 's' + now, start: now, end: now, name: '', notes: '',
+              dragFactor: live.general.dragFactor || null, monitor: live.monitorInfo || null,
+              forceSource: live.forceSource || null, strokes: [] };
+  live.strokes = session.strokes;
+  live.pendingCurve = null;
+  updateRecButtons(); setStatus(); updateTiles(); drawLive();
+  log('Recording started');
+  toast('Recording – strokes from now are saved');
+}
+function updateRecButtons() {
+  const conn = isConnected() || demo.on;
+  $('btnRecord').classList.toggle('hidden', !!session || !conn);
+  $('btnFinish').classList.toggle('hidden', !session);
+  $('recNote').textContent = session
+    ? 'Recording. Every stroke is saved to this phone as you go.'
+    : conn ? (autoRecord ? 'Recording starts automatically on your next stroke.'
+                         : 'Not recording – warm up freely. Strokes now show live but are not saved. Tap Start recording when the work begins.')
+           : 'Connect to the PM5 to begin.';
+}
+function scheduleSave() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(saveSession, 1500);
+  clearTimeout(idleTimer);
+  idleTimer = setTimeout(() => { if (session) finishSession(true); }, IDLE_END_MS);
+}
+async function saveSession() {
+  if (!session || !DB.db) return;
+  try { await DB.put(session); } catch (e) { log('Save failed: ' + e); }
+}
+async function finishSession(auto) {
+  if (!session) return;
+  clearTimeout(saveTimer); clearTimeout(idleTimer);
+  const s = session; session = null;
+  if (s.strokes.length < 3) {
+    try { await DB.del(s.id); } catch(e) {}
+    toast('Too few strokes, session discarded');
+  } else {
+    await DB.put(s);
+    toast(auto ? 'Session auto-saved (no strokes for 5 min)' : `Saved ${s.strokes.length} strokes`);
+  }
+  preview.length = 0;
+  live.strokes = preview; live.pendingCurve = null;
+  updateRecButtons(); setStatus(); updateTiles(); drawLive();
+  renderSessionList();
+}
+
+/* A stroke record is created from 0x0035 stroke data. The force curve
+   (0x003D or CSAFE) for that stroke arrives around the same moment, in
+   either order, so pair them up within a short window. */
+function onStrokeRecord(sd) {
+  if (sd.strokeCount === live.lastStrokeCount) return;   // duplicate notification
+  if (sd.strokeCount < live.lastStrokeCount && session) {   // PM5 reset to a new piece
+    log('Stroke count reset on PM5');
+  }
+  live.lastStrokeCount = sd.strokeCount;
+  if (!session && autoRecord) startRecording();
+  const st = {
+    t: Date.now(), n: sd.strokeCount, time: sd.elapsedTime, dist: sd.distance,
+    driveLen: sd.driveLength, driveTime: sd.driveTime, recTime: sd.recoveryTime,
+    strokeDist: sd.strokeDistance, peakLb: sd.peakForceLb, avgLb: sd.avgForceLb,
+    work: sd.work,
+    rate: live.add.strokeRate ?? null, pace: live.add.currentPace ?? null,
+    hr: live.add.heartRate || null,
+    watts: null, curve: null,
+  };
+  const pc = live.pendingCurve;
+  if (pc && st.t - pc.t < 2500) { attachCurve(st, pc.raw); live.pendingCurve = null; }
+  if (session) {
+    session.strokes.push(st);
+    session.end = st.t;
+    if (live.general.dragFactor) session.dragFactor = live.general.dragFactor;
+    scheduleSave();
+  } else {
+    preview.push(st);
+    if (preview.length > 30) preview.shift();
+  }
+  updateTiles(); drawLive();
+}
+function attachCurve(st, raw) {
+  st.curve = raw;
+  Object.assign(st, curveMetrics(raw));
+}
+function onCurve(raw) {
+  if (!raw || raw.length < 4) return;
+  const strokes = live.strokes;
+  const last = strokes[strokes.length - 1];
+  if (last && !last.curve && Date.now() - last.t < 2500) {
+    attachCurve(last, raw);
+    if (live.unitChecks < 5 && last.peakLb) {
+      live.unitChecks++;
+      log(`Unit check: curve max ${Math.max(...raw)} vs stroke peak ${last.peakLb.toFixed(1)} lb`);
+    }
+    scheduleSave(); updateTiles(); drawLive();
+  } else {
+    live.pendingCurve = { raw, t: Date.now() };
+  }
+}
+live.unitChecks = 0;
+function onAddStroke(d) {
+  live.addStroke = d;
+  const strokes = live.strokes, last = strokes[strokes.length - 1];
+  if (last && last.n === d.strokeCount) { last.watts = d.power; scheduleSave(); }
+  else if (last && last.watts == null && Date.now() - last.t < 2500) last.watts = d.power;
+  updateTiles();
+}
+
+/* =====================================================================
+   Packet parsers (byte layouts per Concept2 PM5 BLE spec)
+   ===================================================================== */
+const Parse = {
+  general(dv) { const v = u8(dv); return {
+    elapsedTime: le24(v,0)*0.01, distance: le24(v,3)*0.1, workoutType: v[6], intervalType: v[7],
+    workoutState: v[8], rowingState: v[9], strokeState: v[10], dragFactor: v[18] }; },
+  additional(dv) { const v = u8(dv); return {
+    elapsedTime: le24(v,0)*0.01, speed: le16(v,3)*0.001, strokeRate: v[5], heartRate: v[6] === 255 ? 0 : v[6],
+    currentPace: le16(v,7)*0.01, averagePace: le16(v,9)*0.01 }; },
+  stroke(dv) { const v = u8(dv); return {
+    elapsedTime: le24(v,0)*0.01, distance: le24(v,3)*0.1, driveLength: v[6]*0.01, driveTime: v[7]*0.01,
+    recoveryTime: le16(v,8)*0.01, strokeDistance: le16(v,10)*0.01, peakForceLb: le16(v,12)*0.1,
+    avgForceLb: le16(v,14)*0.1, work: le16(v,16)*0.1, strokeCount: le16(v,18) }; },
+  addStroke(dv) { const v = u8(dv); return {
+    elapsedTime: le24(v,0)*0.01, power: le16(v,3), calHr: le16(v,5), strokeCount: le16(v,7) }; },
+};
+
+/* 0x003D force curve: byte0 = (total packets << 4) | points in this packet,
+   byte1 = sequence number, then 16-bit little-endian points.            */
+const FC = { buf: [], got: 0, total: 0, lastSeq: -1 };
+function onForceCurvePacket(dv) {
+  const v = u8(dv);
+  const total = v[0] >> 4, n = v[0] & 0x0f, seq = v[1];
+  if (FC.got > 0 && FC.lastSeq >= 0 && seq !== ((FC.lastSeq + 1) & 0xff)) {
+    log(`Force curve packet gap (seq ${FC.lastSeq} → ${seq}), starting fresh`);
+    FC.buf = []; FC.got = 0;
+  }
+  if (FC.got === 0) FC.total = total;
+  for (let i = 0; i < n && 2 + i*2 + 1 < v.length; i++) FC.buf.push(le16(v, 2 + i*2));
+  FC.got++; FC.lastSeq = seq;
+  if (FC.got >= FC.total) {
+    const curve = FC.buf; FC.buf = []; FC.got = 0;
+    onCurve(curve);
+  }
+}
+
+/* =====================================================================
+   CSAFE fallback: poll PM_GET_FORCEPLOTDATA (0x6B) through the control
+   service when the 0x003D characteristic is not available.
+   ===================================================================== */
+const Csafe = {
+  rx: [], busy: false, part: [], iter: 0,
+  frame(bytes) {
+    let chk = 0; bytes.forEach(b => chk ^= b);
+    const out = [0xF1];
+    [...bytes, chk].forEach(b => { if (b >= 0xF0 && b <= 0xF3) out.push(0xF3, b - 0xF0); else out.push(b); });
+    out.push(0xF2);
+    return new Uint8Array(out);
+  },
+  async request() {
+    if (!BLE.ctrlTx) return;
+    try { await BLE.ctrlTx.writeValue(this.frame([0x1A, 0x03, 0x6B, 0x01, 0x14])); }
+    catch (e) { this.busy = false; log('CSAFE write failed: ' + e.message); }
+  },
+  start() { if (this.busy) return; this.busy = true; this.part = []; this.iter = 0; this.request(); },
+  onRx(dv) {
+    const v = u8(dv);
+    for (const b of v) {
+      if (b === 0xF1) { this.rx = []; continue; }
+      if (b === 0xF2) { this.handleFrame(this.rx); this.rx = []; continue; }
+      this.rx.push(b);
+    }
+  },
+  handleFrame(stuffed) {
+    const f = [];
+    for (let i = 0; i < stuffed.length; i++) {
+      if (stuffed[i] === 0xF3) { f.push(0xF0 + stuffed[++i]); } else f.push(stuffed[i]);
+    }
+    // f = [status, cmd, len, ...data, checksum]
+    let i = 1; const end = f.length - 1;
+    while (i < end) {
+      const cmd = f[i], len = f[i+1], data = f.slice(i+2, i+2+len);
+      if (cmd === 0x1A && data[0] === 0x6B) this.handlePlot(data.slice(2, 2 + data[1]));
+      i += 2 + len;
+    }
+  },
+  handlePlot(d) {
+    const nBytes = d[0] || 0;
+    let ended = nBytes === 0, last = 0;
+    for (let i = 1; i + 1 <= nBytes; i += 2) { last = d[i] | (d[i+1] << 8); this.part.push(last); }
+    if (this.part.length > 10 && last === 0) ended = true;
+    this.iter++;
+    if (!ended && this.iter < 12) { this.request(); return; }
+    const curve = this.part.filter((x, i, a) => !(x === 0 && (i === 0 || i === a.length - 1)));
+    this.part = []; this.busy = false;
+    if (curve.length > 4) onCurve(curve);
+  },
+};
+
+/* =====================================================================
+   Bluetooth connection
+   ===================================================================== */
+const BLE = { device: null, server: null, ctrlTx: null, wantConnected: false, wakeLock: null };
+
+async function sub(service, uuid, handler, required) {
+  try {
+    const c = await service.getCharacteristic(uuid);
+    c.addEventListener('characteristicvaluechanged', e => {
+      try { handler(e.target.value); } catch (err) { log('Handler error: ' + err.message); }
+    });
+    await c.startNotifications();
+    return c;
+  } catch (e) {
+    if (required) throw e;
+    log(`Characteristic ${uuid.slice(4,8)} not available: ${e.message}`);
+    return null;
+  }
+}
+
+async function connect() {
+  if (!navigator.bluetooth) { showNoBt(); return; }
+  try {
+    BLE.device = await navigator.bluetooth.requestDevice({
+      filters: [{ services: [SVC.discovery] }, { namePrefix: 'PM5' }],
+      optionalServices: [SVC.info, SVC.control, SVC.rowing],
+    });
+  } catch (e) { if (e.name !== 'NotFoundError') toast(e.message); return; }
+  BLE.wantConnected = true;
+  BLE.device.addEventListener('gattserverdisconnected', onDisconnected);
+  await setupGatt();
+}
+
+async function setupGatt() {
+  try {
+    setStatus('Connecting…');
+    BLE.server = await BLE.device.gatt.connect();
+    log('Connected to ' + (BLE.device.name || 'PM5'));
+    // Monitor info (helps diagnose force curve support)
+    try {
+      const info = await BLE.server.getPrimaryService(SVC.info);
+      const dec = new TextDecoder();
+      const rd = async u => dec.decode(await (await info.getCharacteristic(u)).readValue()).replace(/\0/g,'').trim();
+      live.monitorInfo = { serial: await rd(CH.serial), hw: await rd(CH.hw), fw: await rd(CH.fw) };
+      log(`PM5 serial ${live.monitorInfo.serial}, hardware ${live.monitorInfo.hw}, firmware ${live.monitorInfo.fw}`);
+    } catch (e) { log('Could not read monitor info: ' + e.message); }
+
+    const rowing = await BLE.server.getPrimaryService(SVC.rowing);
+    // Ask for faster status updates (0=1s, 1=500ms, 2=250ms, 3=100ms)
+    try { await (await rowing.getCharacteristic(CH.sampleRate)).writeValue(new Uint8Array([2])); } catch (e) {}
+
+    await sub(rowing, CH.general, dv => {
+      const g = Parse.general(dv), prev = live.general.strokeState;
+      live.general = g;
+      if (live.forceSource === 'csafe' && prev !== 4 && g.strokeState === 4) Csafe.start();
+      updateTiles();
+    }, true);
+    await sub(rowing, CH.additional, dv => { live.add = Parse.additional(dv); updateTiles(); }, true);
+    await sub(rowing, CH.stroke, dv => onStrokeRecord(Parse.stroke(dv)), true);
+    await sub(rowing, CH.addStroke, dv => onAddStroke(Parse.addStroke(dv)), false);
+
+    const fc = await sub(rowing, CH.forceCurve, onForceCurvePacket, false);
+    if (fc) { live.forceSource = 'ble'; log('Force curves: PM5 force curve characteristic (0x003D)'); }
+    else {
+      try {
+        const ctrl = await BLE.server.getPrimaryService(SVC.control);
+        BLE.ctrlTx = await ctrl.getCharacteristic(CH.ctrlTx);
+        await sub(ctrl, CH.ctrlRx, dv => Csafe.onRx(dv), true);
+        live.forceSource = 'csafe';
+        log('Force curves: CSAFE polling fallback');
+      } catch (e) {
+        live.forceSource = null;
+        log('No force curve source available: ' + e.message);
+        toast('Connected, but this PM5 is not sending force curves');
+      }
+    }
+    if (session) session.forceSource = live.forceSource;
+    setStatus();
+    toast('PM5 connected – start rowing');
+    keepAwake();
+  } catch (e) {
+    log('Connection failed: ' + e.message);
+    toast('Connection failed: ' + e.message);
+    setStatus();
+  }
+}
+
+async function onDisconnected() {
+  log('PM5 disconnected');
+  setStatus();
+  if (!BLE.wantConnected) return;
+  for (let i = 1; i <= 5 && BLE.wantConnected; i++) {
+    await new Promise(r => setTimeout(r, 1500 * i));
+    if (BLE.device.gatt.connected) return;
+    log(`Reconnect attempt ${i}`);
+    try { await setupGatt(); if (BLE.device.gatt.connected) return; } catch (e) {}
+  }
+}
+
+function disconnect() {
+  BLE.wantConnected = false;
+  try { BLE.device && BLE.device.gatt.disconnect(); } catch (e) {}
+  stopDemo();
+  setStatus();
+}
+
+async function keepAwake() {
+  try { if ('wakeLock' in navigator && !BLE.wakeLock) {
+    BLE.wakeLock = await navigator.wakeLock.request('screen');
+    BLE.wakeLock.addEventListener('release', () => BLE.wakeLock = null);
+  } } catch (e) {}
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && (isConnected() || demo.on)) keepAwake();
+  if (document.visibilityState === 'hidden') saveSession();
+});
+
+const isConnected = () => !!(BLE.device && BLE.device.gatt && BLE.device.gatt.connected);
+function setStatus(text) {
+  const dot = $('dot');
+  const conn = isConnected() || demo.on;
+  dot.className = 'dot' + (session ? ' rec' : conn ? ' on' : '');
+  $('statusText').textContent = text || (session ? `Recording · ${session.strokes.length} strokes`
+    : demo.on ? 'Demo mode' : conn ? 'Connected' : 'Not connected');
+  $('btnConnect').textContent = conn ? 'Disconnect' : 'Connect PM5';
+  $('btnConnect').className = 'btn grow ' + (conn ? '' : 'primary');
+  $('btnDemo').disabled = isConnected();
+  updateRecButtons();
+}
+function showNoBt() {
+  const ios = /iPhone|iPad|iPod/.test(navigator.userAgent);
+  const box = $('noBt'); box.classList.remove('hidden');
+  box.innerHTML = ios
+    ? '<b>This browser can\'t use Bluetooth.</b> On iPhone, open this page in the free <b>Bluefy</b> browser from the App Store (Safari and Chrome on iOS don\'t support Web Bluetooth). Your saved sessions and Demo still work here.'
+    : (location.protocol !== 'https:' && location.hostname !== 'localhost')
+      ? '<b>Bluetooth needs a secure (https://) page.</b> Open ErgCurve from its https web address rather than as a local file.'
+      : '<b>This browser can\'t use Bluetooth.</b> On Android, open this page in Chrome. On a laptop, use Chrome or Edge.';
+}
+
+/* =====================================================================
+   Demo mode – synthesises real PM5 byte packets and feeds them through
+   the same parsers, so the whole pipeline can be tried without an erg.
+   ===================================================================== */
+const demo = { on: false, h: null, n: 0, t: 0, d: 0 };
+function demoPacket(bytes) { return new DataView(new Uint8Array(bytes).buffer); }
+function put24(a, o, x) { a[o] = x & 255; a[o+1] = (x >> 8) & 255; a[o+2] = (x >> 16) & 255; }
+function put16(a, o, x) { a[o] = x & 255; a[o+1] = (x >> 8) & 255; }
+function demoStroke() {
+  demo.n++;
+  const fatigue = Math.min(1, demo.n / 400);
+  const rate = 20 + Math.round(2*Math.sin(demo.n/30));
+  const npts = 22 + Math.round(Math.random()*4);
+  const peakPos = 0.38 + 0.08*fatigue + (Math.random()-0.5)*0.06;
+  const peak = (175 - 20*fatigue) * (0.93 + Math.random()*0.14);  // lb
+  const raw = [];
+  for (let i = 0; i < npts; i++) {
+    const x = i/(npts-1);
+    const a = x < peakPos ? Math.sin(Math.PI/2 * x/peakPos) : Math.cos(Math.PI/2 * (x-peakPos)/(1-peakPos));
+    const bump = (fatigue > .5 && Math.abs(x - 0.7) < 0.08) ? -0.08 : 0;
+    raw.push(Math.max(0, Math.round(peak * Math.pow(Math.max(0,a), 1.15) * (1 + bump) + (Math.random()-0.5)*4)));
+  }
+  raw[raw.length-1] = 0;
+  const strokeTime = 60/rate;
+  demo.t += strokeTime; demo.d += 10.2 - 1.2*fatigue;
+  const pace = 500 / ((10.2 - 1.2*fatigue) / strokeTime);
+  const watts = Math.round(2.8 / Math.pow(pace/500, 3));
+  // 0x0032 additional status
+  const a = new Array(17).fill(0);
+  put24(a,0,Math.round(demo.t*100)); put16(a,3,Math.round(500/pace*1000)); a[5]=rate; a[6]=150+Math.round(fatigue*15);
+  put16(a,7,Math.round(pace*100)); put16(a,9,Math.round(pace*100));
+  live.add = Parse.additional(demoPacket(a));
+  // 0x0031 general status
+  const g = new Array(19).fill(0);
+  put24(g,0,Math.round(demo.t*100)); put24(g,3,Math.round(demo.d*10)); g[18]=118;
+  live.general = Parse.general(demoPacket(g));
+  // 0x0035 stroke data
+  const s = new Array(20).fill(0);
+  put24(s,0,Math.round(demo.t*100)); put24(s,3,Math.round(demo.d*10)); s[6]=Math.round(142 - 6*fatigue);
+  s[7]=Math.round(strokeTime*0.33*100); put16(s,8,Math.round(strokeTime*0.67*100)); put16(s,10,1020);
+  put16(s,12,Math.round(Math.max(...raw)*10)); put16(s,14,Math.round(mean(raw)*10)); put16(s,16,6000); put16(s,18,demo.n);
+  onStrokeRecord(Parse.stroke(demoPacket(s)));
+  // 0x0036 additional stroke data
+  const as = new Array(15).fill(0);
+  put24(as,0,Math.round(demo.t*100)); put16(as,3,watts); put16(as,7,demo.n);
+  onAddStroke(Parse.addStroke(demoPacket(as)));
+  // 0x003D force curve, split into packets of up to 9 points
+  const chunks = []; for (let i = 0; i < raw.length; i += 9) chunks.push(raw.slice(i, i+9));
+  chunks.forEach(ch => {
+    const p = [(chunks.length << 4) | ch.length, demo.seq = ((demo.seq ?? -1) + 1) & 255];
+    ch.forEach(x => p.push(x & 255, x >> 8));
+    onForceCurvePacket(demoPacket(p));
+  });
+}
+function startDemo(fast) {
+  if (demo.on) return;
+  demo.on = true; demo.n = 0; demo.t = 0; demo.d = 0;
+  live.forceSource = 'demo';
+  demo.h = setInterval(demoStroke, fast ? 20 : 2800);
+  $('btnDemo').textContent = 'Stop demo';
+  setStatus(); toast('Demo: simulated strokes every ~3 s');
+}
+function stopDemo() {
+  if (!demo.on) return;
+  clearInterval(demo.h); demo.on = false;
+  $('btnDemo').textContent = 'Demo';
+  setStatus();
+}
+
+/* =====================================================================
+   Charts (plain canvas, no libraries)
+   ===================================================================== */
+function setupCanvas(c) {
+  const dpr = window.devicePixelRatio || 1;
+  if (!c.dataset.h) c.dataset.h = c.getAttribute('height');
+  const w = c.clientWidth || 340, h = +c.dataset.h;
+  c.width = w * dpr; c.height = h * dpr; c.style.height = h + 'px';
+  const ctx = c.getContext('2d'); ctx.setTransform(dpr,0,0,dpr,0,0);
+  return { ctx, w, h };
+}
+/* opts: { series:[{y:[..], x?:[..], color, width, alpha, dash, fillTo?:[..]}], xMax, yMax, xLabel, yLabel, y2? } */
+function chart(c, opts) {
+  const { ctx, w, h } = setupCanvas(c);
+  const css = getComputedStyle(document.documentElement);
+  const muted = css.getPropertyValue('--muted'), line = css.getPropertyValue('--line');
+  const L = 38, R = opts.y2 ? 34 : 8, T = 8, B = 22;
+  const pw = w - L - R, ph = h - T - B;
+  ctx.clearRect(0,0,w,h);
+  const allY = opts.series.filter(s => !s.axis2).flatMap(s => [...s.y, ...(s.fillTo||[])]).filter(v => v != null && !isNaN(v));
+  const yMax = opts.yMax || niceMax(Math.max(10, ...allY));
+  const yMin = opts.yMin ?? 0;
+  const xMax = opts.xMax ?? Math.max(1, ...opts.series.map(s => s.x ? Math.max(...s.x) : s.y.length - 1));
+  const xMin = opts.xMin ?? 0;
+  const X = x => L + (x - xMin) / ((xMax - xMin) || 1) * pw;
+  const Y = (y, ax2) => ax2 ? T + ph - (y - opts.y2.min) / (opts.y2.max - opts.y2.min) * ph
+                            : T + ph - (y - yMin) / ((yMax - yMin) || 1) * ph;
+  // grid
+  ctx.font = '10px sans-serif'; ctx.fillStyle = muted; ctx.strokeStyle = line; ctx.lineWidth = 1;
+  for (let i = 0; i <= 4; i++) {
+    const yv = yMin + (yMax - yMin) * i / 4, yy = Y(yv);
+    ctx.beginPath(); ctx.moveTo(L, yy); ctx.lineTo(L + pw, yy); ctx.stroke();
+    ctx.textAlign = 'right'; ctx.fillText(Math.round(yv), L - 4, yy + 3);
+    if (opts.y2) { ctx.textAlign = 'left'; const y2v = opts.y2.min + (opts.y2.max - opts.y2.min) * i / 4;
+      ctx.fillText(Math.round(y2v), L + pw + 4, yy + 3); }
+  }
+  ctx.textAlign = 'center';
+  for (let i = 0; i <= 4; i++) { const xv = xMin + (xMax - xMin) * i / 4;
+    ctx.fillText(opts.xFmt ? opts.xFmt(xv) : Math.round(xv), X(xv), h - 8); }
+  if (opts.yLabel) { ctx.save(); ctx.translate(10, T + ph/2); ctx.rotate(-Math.PI/2); ctx.fillText(opts.yLabel, 0, 0); ctx.restore(); }
+  // series
+  for (const s of opts.series) {
+    const xs = s.x || s.y.map((_, i) => xMin + i * (xMax - xMin) / Math.max(1, s.y.length - 1));
+    ctx.globalAlpha = s.alpha ?? 1;
+    if (s.fillTo) {
+      ctx.fillStyle = s.color; ctx.beginPath();
+      s.y.forEach((y, i) => i ? ctx.lineTo(X(xs[i]), Y(y)) : ctx.moveTo(X(xs[i]), Y(y)));
+      for (let i = s.fillTo.length - 1; i >= 0; i--) ctx.lineTo(X(xs[i]), Y(s.fillTo[i]));
+      ctx.closePath(); ctx.fill();
+    } else if (s.dots) {
+      ctx.fillStyle = s.color;
+      s.y.forEach((y, i) => { if (y == null || isNaN(y)) return; ctx.beginPath(); ctx.arc(X(xs[i]), Y(y, s.axis2), s.r || 1.6, 0, 7); ctx.fill(); });
+    } else {
+      ctx.strokeStyle = s.color; ctx.lineWidth = s.width || 2; ctx.setLineDash(s.dash || []);
+      ctx.lineJoin = 'round'; ctx.beginPath(); let started = false;
+      s.y.forEach((y, i) => { if (y == null || isNaN(y)) { started = false; return; }
+        const px = X(xs[i]), py = Y(y, s.axis2); started ? ctx.lineTo(px, py) : ctx.moveTo(px, py); started = true; });
+      ctx.stroke(); ctx.setLineDash([]);
+    }
+    ctx.globalAlpha = 1;
+  }
+  if (opts.empty) { ctx.fillStyle = muted; ctx.textAlign = 'center'; ctx.font = '13px sans-serif';
+    ctx.fillText(opts.empty, L + pw/2, T + ph/2); }
+}
+function niceMax(v) { const p = Math.pow(10, Math.floor(Math.log10(v))); const n = v / p;
+  return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 2.5 ? 2.5 : n <= 5 ? 5 : 10) * p; }
+const pctX = x => Math.round(x) + '%';
+
+/* =====================================================================
+   Live view
+   ===================================================================== */
+function updateTiles() {
+  const s = live.strokes, last = s[s.length - 1];
+  $('tSplit').textContent = fmtSplit(live.add.currentPace);
+  $('tRate').textContent = live.add.strokeRate || '–';
+  $('tWatts').textContent = (last && last.watts) || live.addStroke.power || '–';
+  $('tPeak').textContent = last && last.peakLb ? Math.round(fConv(last.peakLb)) : '–';
+  $('tPeak').nextElementSibling.textContent = 'peak ' + uLabel();
+  $('tTime').textContent = fmtTime(live.general.elapsedTime);
+  $('tDist').textContent = live.general.distance != null ? Math.round(live.general.distance) : '–';
+  $('tStrokes').textContent = session ? session.strokes.length : '–';
+  $('tDrive').textContent = last && last.driveLen ? last.driveLen.toFixed(2) : '–';
+  if (session) setStatus();
+}
+let liveDrawPending = false;
+function drawLive() {
+  if (liveDrawPending) return; liveDrawPending = true;
+  requestAnimationFrame(() => { liveDrawPending = false; drawLiveNow(); });
+}
+function drawLiveNow() {
+  if ($('viewLive').classList.contains('hidden')) return;
+  const withCurve = live.strokes.filter(s => s.curve);
+  const series = [];
+  if (withCurve.length) {
+    const rs = withCurve.map(s => resample(s.curve).map(fConv));
+    const avg = rs[0].map((_, i) => mean(rs.map(r => r[i])));
+    withCurve.slice(-6, -1).forEach(s => series.push({ y: resample(s.curve).map(fConv), color: '#8a9bb0', alpha: .35, width: 1.5 }));
+    if (rs.length > 1) series.push({ y: avg, color: '#ff9f43', width: 2, dash: [5,4] });
+    series.push({ y: rs[rs.length - 1], color: '#3ba3ff', width: 3 });
+  }
+  chart($('cLive'), { series, xMax: 100, xFmt: pctX, yLabel: uLabel(),
+    empty: series.length ? null : (isConnected() || demo.on ? 'Waiting for first stroke…' : 'Connect to see your force curve') });
+  const s = live.strokes;
+  chart($('cLiveTrend'), {
+    series: [
+      { y: s.map(x => x.peakLb ? fConv(x.peakLb) : null), color: '#3ba3ff', width: 1.8 },
+      { y: s.map(x => x.peakPos ?? null), color: '#ff9f43', width: 1.5, axis2: true },
+    ],
+    xMax: Math.max(10, s.length - 1), y2: { min: 0, max: 100 }, yLabel: uLabel(),
+    empty: s.length ? null : ' ',
+  });
+}
+
+/* =====================================================================
+   Sessions list & detail analysis
+   ===================================================================== */
+let sessionsCache = [];
+async function renderSessionList() {
+  if (!DB.db) return;
+  sessionsCache = (await DB.all()).sort((a, b) => b.start - a.start);
+  const el = $('sessList');
+  if (!sessionsCache.length) { el.innerHTML = '<p class="note">No sessions yet. Connect to the PM5 and row, or try Demo on the Live tab.</p>'; return; }
+  el.innerHTML = '';
+  for (const s of sessionsCache) {
+    const st = s.strokes, cov = covered(st);
+    const d = new Date(s.start);
+    const div = document.createElement('div'); div.className = 'sess';
+    const curves = st.filter(x => x.curve).length;
+    div.innerHTML = `<div><div class="t"></div><div class="m"></div></div><div class="chev">›</div>`;
+    div.querySelector('.t').textContent = s.name || d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' }) + ' · ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    div.querySelector('.m').textContent = `${st.length} strokes · ${Math.round(cov.d)} m · ${fmtTime(cov.t)} · ${curves} curves` + (s.name ? ' · ' + d.toLocaleDateString() : '');
+    div.onclick = () => openDetail(s.id);
+    el.appendChild(div);
+  }
+}
+
+const detail = { s: null, part: 'all', metric: 'peak', cmp: '' };
+const PARTS = [['all','All'],['q1','1st ¼'],['q2','2nd ¼'],['q3','3rd ¼'],['q4','4th ¼']];
+const METRICS = [
+  ['peak','Peak force', s => s.peakLb ? fConv(s.peakLb) : null, () => uLabel()],
+  ['avg','Avg force', s => s.avgLb ? fConv(s.avgLb) : null, () => uLabel()],
+  ['pos','Peak position', s => s.peakPos ?? null, () => '% drive'],
+  ['ratio','Avg/peak', s => s.ratio != null ? s.ratio * 100 : null, () => '%'],
+  ['len','Drive length', s => s.driveLen ? s.driveLen * 100 : null, () => 'cm'],
+  ['watts','Watts', s => s.watts, () => 'W'],
+  ['rate','Rate', s => s.rate, () => 'spm'],
+  ['split','Split', s => s.pace && s.pace < 600 ? s.pace : null, () => 's/500m'],
+];
+
+async function openDetail(id) {
+  const s = await DB.get(id); if (!s) return;
+  detail.s = s; detail.part = 'all'; detail.cmp = '';
+  $('dName').value = s.name || ''; $('dNotes').value = s.notes || '';
+  ['fMin','fMax','fFrom','fTo','fLen'].forEach(k => $(k).value = '');
+  const d = new Date(s.start);
+  $('dWhen').textContent = `${d.toLocaleString()} · drag factor ${s.dragFactor || '?'} · force source: ${s.forceSource || '?'}` +
+    (s.monitor ? ` · PM5 fw ${s.monitor.fw}` : '');
+  const sel = $('dCompare'); sel.innerHTML = '<option value="">— none —</option>';
+  sessionsCache.filter(x => x.id !== id).forEach(x => {
+    const o = document.createElement('option'); o.value = x.id;
+    o.textContent = (x.name || new Date(x.start).toLocaleString()) + ` (${x.strokes.length})`; sel.appendChild(o);
+  });
+  sel.value = '';
+  show('viewDetail');
+  renderDetail();
+}
+
+function filteredStrokes(s, part) {
+  let st = s.strokes;
+  const fr = parseInt($('fFrom').value), to = parseInt($('fTo').value), ln = parseFloat($('fLen').value);
+  if (!isNaN(fr) || !isNaN(to)) st = st.slice(isNaN(fr) ? 0 : Math.max(0, fr - 1), isNaN(to) ? undefined : to);
+  if (!isNaN(ln)) st = st.filter(x => x.driveLen != null && x.driveLen >= ln);
+  const mn = parseFloat($('fMin').value), mx = parseFloat($('fMax').value);
+  if (!isNaN(mn)) st = st.filter(x => x.rate != null && x.rate >= mn);
+  if (!isNaN(mx)) st = st.filter(x => x.rate != null && x.rate <= mx);
+  if (part && part !== 'all') { const q = +part[1], n = st.length;
+    st = st.slice(Math.floor((q-1)*n/4), Math.floor(q*n/4)); }
+  return st;
+}
+function avgCurve(strokes) {
+  const rs = strokes.filter(x => x.curve && x.curve.length > 3).map(x => resample(x.curve).map(fConv));
+  if (!rs.length) return null;
+  const m = rs[0].map((_, i) => mean(rs.map(r => r[i])));
+  const d = rs[0].map((_, i) => sd(rs.map(r => r[i])));
+  return { mean: m, sd: d, n: rs.length };
+}
+
+function renderDetail() {
+  const s = detail.s; if (!s) return;
+  // segment buttons
+  $('segPart').innerHTML = '';
+  PARTS.forEach(([k, label]) => { const b = document.createElement('button'); b.textContent = label;
+    if (detail.part === k) b.className = 'active'; b.onclick = () => { detail.part = k; renderDetail(); }; $('segPart').appendChild(b); });
+  $('segMetric').innerHTML = '';
+  METRICS.forEach(([k, label]) => { const b = document.createElement('button'); b.textContent = label;
+    if (detail.metric === k) b.className = 'active'; b.onclick = () => { detail.metric = k; renderDetail(); }; $('segMetric').appendChild(b); });
+
+  const st = filteredStrokes(s, detail.part);
+  $('fInfo').textContent = `${st.length} of ${s.strokes.length} strokes selected`;
+
+  // summary
+  const cov = covered(st);
+  const v = f => st.map(f).filter(x => x != null && !isNaN(x) && x > 0);
+  const rows = [
+    ['Strokes', `${st.length}`],
+    ['Distance (selected strokes)', Math.round(cov.d) + ' m'],
+    ['Time (selected strokes)', fmtTime(cov.t)],
+    ['Avg split', fmtSplit(mean(v(x => x.pace < 600 ? x.pace : null)))],
+    ['Avg rate', mean(v(x => x.rate)).toFixed(1) + ' spm'],
+    ['Avg watts', Math.round(mean(v(x => x.watts))) || '–'],
+    ['Avg peak force', Math.round(mean(v(x => x.peakLb ? fConv(x.peakLb) : null))) + ' ' + uLabel() + ` (SD ${Math.round(sd(v(x => x.peakLb ? fConv(x.peakLb) : null)))})`],
+    ['Avg drive force', Math.round(mean(v(x => x.avgLb ? fConv(x.avgLb) : null))) + ' ' + uLabel()],
+    ['Peak position', mean(v(x => x.peakPos)).toFixed(0) + '% of drive' + ` (SD ${sd(v(x => x.peakPos)).toFixed(1)})`],
+    ['Avg/peak (fullness)', (mean(v(x => x.ratio)) * 100).toFixed(0) + '%'],
+    ['Drive length', mean(v(x => x.driveLen)).toFixed(2) + ' m'],
+    ['Drive / recovery time', mean(v(x => x.driveTime)).toFixed(2) + ' / ' + mean(v(x => x.recTime)).toFixed(2) + ' s'],
+    ['Avg heart rate', Math.round(mean(v(x => x.hr))) || '–'],
+    ['Strokes with a curve', `${st.filter(x => x.curve).length}`],
+  ];
+  $('dSummary').innerHTML = rows.map(([a, b]) => `<tr><td>${a}</td><td>${b}</td></tr>`).join('').replace(/NaN[^<]*/g, '–');
+
+  // average curve ± SD (+ compare)
+  const ac = avgCurve(st);
+  const series = [];
+  if (ac) {
+    series.push({ y: ac.mean.map((m, i) => m + ac.sd[i]), fillTo: ac.mean.map((m, i) => Math.max(0, m - ac.sd[i])), color: '#3ba3ff', alpha: .22 });
+    series.push({ y: ac.mean, color: '#3ba3ff', width: 3 });
+  }
+  const cmp = sessionsCache.find(x => x.id === detail.cmp);
+  $('cmpLegend').classList.toggle('hidden', !cmp);
+  if (cmp) { const cc = avgCurve(filteredStrokes(cmp, 'all')); if (cc) series.push({ y: cc.mean, color: '#ff9f43', width: 2.5, dash: [6,4] }); }
+  chart($('cAvg'), { series, xMax: 100, xFmt: pctX, yLabel: uLabel(), empty: ac ? null : 'No force curves in these strokes' });
+
+  // quarters
+  const all = filteredStrokes(s, 'all');
+  const qColors = ['#7fd1ff', '#3ba3ff', '#ff9f43', '#ff5c5c'];
+  const qSeries = [];
+  [1,2,3,4].forEach(q => { const n = all.length; const part = all.slice(Math.floor((q-1)*n/4), Math.floor(q*n/4));
+    const c = avgCurve(part); if (c) qSeries.push({ y: c.mean, color: qColors[q-1], width: 2.2 }); });
+  $('quartLegend').innerHTML = ['1st','2nd','3rd','4th'].map((l, i) => `<span><i style="background:${qColors[i]}"></i>${l} quarter</span>`).join('');
+  chart($('cQuart'), { series: qSeries, xMax: 100, xFmt: pctX, yLabel: uLabel(), empty: qSeries.length ? null : 'Not enough curves' });
+
+  // per stroke metric
+  const M = METRICS.find(m => m[0] === detail.metric);
+  const ys = st.map(M[2]);
+  const ma = ys.map((_, i) => { const w = ys.slice(Math.max(0, i - 9), i + 1).filter(x => x != null); return w.length ? mean(w) : null; });
+  const vals = ys.filter(x => x != null);
+  chart($('cMetric'), {
+    series: [{ y: ys, color: '#8a9bb0', dots: true, r: 1.8 }, { y: ma, color: '#3ba3ff', width: 2.2 }],
+    xMax: Math.max(1, st.length - 1), yLabel: M[3](),
+    yMin: vals.length ? Math.floor(Math.min(...vals) * 0.95) : 0, yMax: vals.length ? Math.ceil(Math.max(...vals) * 1.05) : 10,
+    empty: vals.length ? null : 'No data',
+  });
+
+  // single stroke
+  const sl = $('strokeSlider'); sl.max = Math.max(0, st.length - 1);
+  if (+sl.value > +sl.max) sl.value = sl.max;
+  drawSingle(st);
+}
+function drawSingle(st) {
+  const i = +$('strokeSlider').value, x = st[i];
+  if (!x) { $('strokeInfo').textContent = ''; chart($('cStroke'), { series: [], empty: 'No strokes' }); return; }
+  $('strokeInfo').textContent = `Stroke ${x.n} · ${fmtTime(x.time)} · ${x.rate ?? '?'} spm · ${fmtSplit(x.pace)} · ` +
+    `peak ${x.peakLb ? Math.round(fConv(x.peakLb)) : '?'} ${uLabel()} at ${x.peakPos != null ? x.peakPos.toFixed(0) + '%' : '?'} · drive ${x.driveLen?.toFixed(2) ?? '?'} m`;
+  const ac = avgCurve(st);
+  const series = [];
+  if (ac) series.push({ y: ac.mean, color: '#8a9bb0', width: 1.5, dash: [4,4] });
+  if (x.curve) series.push({ y: resample(x.curve).map(fConv), color: '#3ba3ff', width: 3 });
+  chart($('cStroke'), { series, xMax: 100, xFmt: pctX, yLabel: uLabel(), empty: x.curve ? null : 'No curve for this stroke' });
+}
+
+/* =====================================================================
+   Export / import
+   ===================================================================== */
+function fileName(s, ext) {
+  const d = new Date(s.start); const p = n => String(n).padStart(2, '0');
+  const base = `ergcurve_${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}`;
+  return base + (s.name ? '_' + s.name.replace(/[^\w-]+/g, '_').slice(0, 30) : '') + '.' + ext;
+}
+function toCsv(s) {
+  const maxPts = Math.max(0, ...s.strokes.map(x => x.curve ? x.curve.length : 0));
+  const head = ['stroke','elapsed_s','distance_m','rate_spm','split_s_per_500m','watts','heart_rate',
+    'drive_length_m','drive_time_s','recovery_time_s','peak_force_N','avg_force_N','peak_position_pct','avg_over_peak',
+    'curve_points', ...Array.from({ length: maxPts }, (_, i) => 'f' + i + '_lb')];
+  const r = v => v == null || isNaN(v) ? '' : (Math.round(v * 1000) / 1000);
+  const lines = [head.join(',')];
+  for (const x of s.strokes) {
+    lines.push([x.n, r(x.time), r(x.dist), x.rate ?? '', r(x.pace), x.watts ?? '', x.hr ?? '', r(x.driveLen), r(x.driveTime),
+      r(x.recTime), r(x.peakLb * LB_TO_N), r(x.avgLb * LB_TO_N), r(x.peakPos), r(x.ratio), x.curve ? x.curve.length : 0,
+      ...(x.curve || [])].join(','));
+  }
+  return lines.join('\n');
+}
+async function deliver(name, text, mime) {
+  const blob = new Blob([text], { type: mime });
+  // Prefer the phone's share sheet (Drive, Files, email…), fall back to a download
+  try {
+    const file = new File([blob], name, { type: mime });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: name }); return; }
+  } catch (e) { if (e.name === 'AbortError') return; }
+  if (/iPhone|iPad|iPod/.test(navigator.userAgent)) {
+    // In-app browsers on iOS (e.g. Bluefy) often can't download files: offer copy instead
+    $('modalText').innerHTML = `<b>Copy ${name}?</b><br><span class="note">This browser may not save files directly. Tap Copy, then paste into a new note (Notes app) or a text file in Files. Re-import later from Backup &amp; info.</span>`;
+    $('modalYes').textContent = 'Copy'; $('modal').classList.remove('hidden');
+    $('modalNo').onclick = () => { $('modal').classList.add('hidden'); $('modalYes').textContent = 'OK'; };
+    $('modalYes').onclick = () => {
+      navigator.clipboard.writeText(text).then(() => toast('Copied – paste it into Notes or Files'))
+        .catch(() => toast('Copy failed – try the Download option on a laptop'));
+      $('modal').classList.add('hidden'); $('modalYes').textContent = 'OK';
+    };
+    return;
+  }
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+
+/* =====================================================================
+   Navigation & wiring
+   ===================================================================== */
+function show(view) {
+  ['viewLive','viewSessions','viewDetail','viewMore'].forEach(v => $(v).classList.toggle('hidden', v !== view));
+  $('tabLive').classList.toggle('active', view === 'viewLive');
+  $('tabSessions').classList.toggle('active', view === 'viewSessions' || view === 'viewDetail');
+  $('tabMore').classList.toggle('active', view === 'viewMore');
+  if (view === 'viewLive') drawLive();
+  if (view === 'viewSessions') renderSessionList();
+  window.scrollTo(0, 0);
+}
+$('tabLive').onclick = () => show('viewLive');
+$('tabSessions').onclick = () => show('viewSessions');
+$('tabMore').onclick = () => show('viewMore');
+$('btnBack').onclick = () => show('viewSessions');
+$('btnConnect').onclick = () => (isConnected() ? disconnect() : connect());
+$('btnDemo').onclick = () => (demo.on ? stopDemo() : startDemo());
+$('btnRecord').onclick = () => startRecording();
+$('btnFinish').onclick = async () => { if (await confirmBox('Finish and save this session?')) { stopDemo(); finishSession(false); } };
+['fMin','fMax','fFrom','fTo','fLen'].forEach(k => $(k).oninput = () => renderDetail());
+$('dCompare').onchange = e => { detail.cmp = e.target.value; renderDetail(); };
+$('strokeSlider').oninput = () => drawSingle(filteredStrokes(detail.s, detail.part));
+const saveMeta = async () => { if (!detail.s) return; detail.s.name = $('dName').value.trim(); detail.s.notes = $('dNotes').value; await DB.put(detail.s); };
+$('dName').onchange = saveMeta; $('dNotes').onchange = saveMeta;
+$('btnCsv').onclick = () => deliver(fileName(detail.s, 'csv'), toCsv(detail.s), 'text/csv');
+$('btnJson').onclick = () => deliver(fileName(detail.s, 'json'), JSON.stringify(detail.s), 'application/json');
+$('btnDelete').onclick = async () => {
+  if (!await confirmBox('Delete this session for good? Export it first if you want a copy.')) return;
+  await DB.del(detail.s.id); detail.s = null; toast('Deleted'); show('viewSessions');
+};
+$('btnBackup').onclick = async () => {
+  const all = await DB.all();
+  const d = new Date(), p = n => String(n).padStart(2, '0');
+  deliver(`ergcurve_backup_${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}.json`,
+    JSON.stringify({ app: 'ergcurve', version: 1, exported: d.toISOString(), sessions: all }), 'application/json');
+};
+async function importText(txt) {
+  try {
+    const data = JSON.parse(txt);
+    const list = Array.isArray(data.sessions) ? data.sessions : (data.strokes ? [data] : []);
+    let n = 0; for (const s of list) if (s && s.id && Array.isArray(s.strokes)) { await DB.put(s); n++; }
+    toast(`Imported ${n} session${n === 1 ? '' : 's'}`); renderSessionList();
+    return n;
+  } catch (err) { toast('Import failed: ' + (txt.trim().startsWith('stroke,') ? 'CSV can\'t be imported, use a JSON/backup copy' : err.message)); return 0; }
+}
+$('fileImport').onchange = async e => {
+  const f = e.target.files[0]; if (!f) return;
+  await importText(await f.text());
+  e.target.value = '';
+};
+$('btnPasteImport').onclick = async () => { if (await importText($('pasteImport').value)) $('pasteImport').value = ''; };
+$('unitSel').value = units;
+$('autoRec').checked = autoRecord;
+$('autoRec').onchange = e => { autoRecord = e.target.checked; try { localStorage.setItem('ergcurve-autorec', autoRecord ? '1' : '0'); } catch (x) {} updateRecButtons(); };
+$('unitSel').onchange = e => { units = e.target.value; try { localStorage.setItem('ergcurve-units', units); } catch (x) {} updateTiles(); drawLive(); };
+window.addEventListener('resize', () => { drawLive(); if (!$('viewDetail').classList.contains('hidden')) renderDetail(); });
+window.addEventListener('beforeunload', () => { saveSession(); });
+
+(async function init() {
+  if (!navigator.bluetooth) showNoBt();
+  try { await DB.open(); } catch (e) {
+    $('storageNote').textContent = 'Storage unavailable in this browser mode (private browsing?) – sessions will not be saved.';
+    log('IndexedDB unavailable: ' + e);
+  }
+  try {
+    if (navigator.storage && navigator.storage.persist) {
+      const ok = await navigator.storage.persist();
+      $('storageNote').textContent = ok ? 'Storage is marked persistent, so the browser won\'t clear it to free space.' : 'Tip: add this page to your home screen so the browser keeps its storage.';
+    }
+  } catch (e) {}
+  // Recover a session that was mid-recording when the page closed
+  try {
+    const all = await DB.all();
+    for (const s of all) if (s.strokes.length < 3) await DB.del(s.id);
+  } catch (e) {}
+  setStatus(); updateTiles(); drawLive();
+  if (location.hash === '#demo-fast') { startDemo(true); startRecording(); }   // used for automated testing
+})();
+</script>
+</body>
+</html>
