@@ -128,7 +128,12 @@
       <span><i style="background:var(--accent)"></i>this stroke</span>
       <span><i style="background:#8a9bb0"></i>last 5</span>
       <span><i style="background:var(--accent2)"></i>session average</span>
+      <span><i style="background:var(--good)"></i>drawing live</span>
     </div>
+    <label style="display:flex;gap:10px;align-items:center;margin-top:10px">
+      <input type="checkbox" id="liveDraw" style="width:22px;height:22px">
+      <span>Live draw during the drive <span class="note">(experimental)</span></span></label>
+    <div class="note" id="liveDrawInfo">Off: the curve appears when each drive finishes. Saved data is the same either way.</div>
   </div>
   <div class="card">
     <h3>Peak force &amp; peak position, this session</h3>
@@ -568,7 +573,10 @@ const Csafe = {
     let i = 1; const end = f.length - 1;
     while (i < end) {
       const cmd = f[i], len = f[i+1], data = f.slice(i+2, i+2+len);
-      if (cmd === 0x1A && data[0] === 0x6B) this.handlePlot(data.slice(2, 2 + data[1]));
+      if (cmd === 0x1A && data[0] === 0x6B) {
+        const pd = data.slice(2, 2 + data[1]);
+        if (LiveDraw.waiting) LiveDraw.waiting(pd); else this.handlePlot(pd);
+      }
       i += 2 + len;
     }
   },
@@ -582,6 +590,77 @@ const Csafe = {
     const curve = this.part.filter((x, i, a) => !(x === 0 && (i === 0 || i === a.length - 1)));
     this.part = []; this.busy = false;
     if (curve.length > 4) onCurve(curve);
+  },
+};
+
+/* =====================================================================
+   EXPERIMENTAL live draw: keep asking the PM5 for "force points so far"
+   (CSAFE 0x6B) so the curve can be drawn while the drive is happening.
+   Display only: saved curves still come from 0x003D. If a 0x003D curve
+   doesn't arrive for a stroke, the live-collected curve is saved instead.
+   ===================================================================== */
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+let liveDrawOn = false;
+try { liveDrawOn = localStorage.getItem('ergcurve-livedraw') === '1'; } catch (e) {}
+const LiveDraw = {
+  running: false, waiting: null, buf: [], lastPt: 0, driveStart: 0, updates: 0, rtts: [], drives: 0, backups: 0,
+  points(d) { const n = d[0] || 0, pts = []; for (let i = 1; i + 1 <= n; i += 2) pts.push(d[i] | (d[i+1] << 8)); return pts; },
+  start() {
+    if (this.running || !BLE.ctrlTx || !liveDrawOn) return;
+    this.running = true; this.drives = 0; this.backups = 0;
+    log('Live draw: started polling the PM5 during the drive');
+    this.loop();
+  },
+  request() {
+    return new Promise(res => {
+      const t0 = performance.now();
+      const to = setTimeout(() => { this.waiting = null; res(null); }, 600);
+      this.waiting = d => { clearTimeout(to); this.waiting = null;
+        this.rtts.push(performance.now() - t0); if (this.rtts.length > 60) this.rtts.shift(); res(d); };
+      BLE.ctrlTx.writeValue(Csafe.frame([0x1A, 0x03, 0x6B, 0x01, 0x14]))
+        .catch(e => { clearTimeout(to); this.waiting = null; log('Live draw write failed: ' + e.message); res(null); });
+    });
+  },
+  async loop() {
+    let timeouts = 0;
+    while (this.running && liveDrawOn && isConnected()) {
+      if (Csafe.busy) { await sleep(50); continue; }
+      const d = await this.request();
+      const now = performance.now();
+      if (d === null) { if (++timeouts === 5) log('Live draw: PM5 not answering force requests'); await sleep(200); continue; }
+      timeouts = 0;
+      const pts = this.points(d);
+      if (pts.length) {
+        if (!this.buf.length) { this.driveStart = now; this.updates = 0; }
+        this.buf.push(...pts); this.updates++; this.lastPt = now;
+        drawLive();
+      } else {
+        if (this.buf.length && now - this.lastPt > 150) this.finish();
+        await sleep(30);
+      }
+    }
+    this.running = false;
+    if (this.buf.length) this.finish();
+  },
+  finish() {
+    const raw = this.buf.slice(); this.buf = []; this.drives++;
+    while (raw.length && raw[0] === 0) raw.shift();
+    const stats = `${this.updates} update${this.updates === 1 ? '' : 's'}, ${raw.length} points over ${Math.round(this.lastPt - this.driveStart)} ms, avg reply ${Math.round(mean(this.rtts))} ms`;
+    $('liveDrawInfo').textContent = 'Last drive: ' + stats + (this.updates <= 1 ? ' – the PM5 is only giving the curve at the end, so it can\'t draw live.' : '');
+    if (this.drives <= 8) log(`Live draw drive ${this.drives}: ${stats}`);
+    drawLive();
+    if (raw.length < 5) return;
+    if (live.forceSource === 'csafe') { onCurve(raw); return; }
+    const n = this.drives;
+    setTimeout(() => {   // backup: save the live curve if the normal 0x003D one never came
+      const last = live.strokes[live.strokes.length - 1];
+      if (!last || Date.now() - last.t > 4000) return;
+      if (!last.curve) {
+        attachCurve(last, raw); last.curveSrc = 'live'; this.backups++;
+        if (this.backups <= 3) log('Normal curve missing for a stroke – saved the live-draw curve instead');
+        if (session) scheduleSave(); drawLive();
+      } else if (n <= 8) log(`  compare: live ${raw.length} pts vs PM5 curve ${last.curve.length} pts`);
+    }, 1500);
   },
 };
 
@@ -639,28 +718,28 @@ async function setupGatt() {
     await sub(rowing, CH.general, dv => {
       const g = Parse.general(dv), prev = live.general.strokeState;
       live.general = g;
-      if (live.forceSource === 'csafe' && prev !== 4 && g.strokeState === 4) Csafe.start();
+      syncClock(g.elapsedTime);
+      if (live.forceSource === 'csafe' && !LiveDraw.running && prev !== 4 && g.strokeState === 4) Csafe.start();
       updateTiles();
     }, true);
-    await sub(rowing, CH.additional, dv => { live.add = Parse.additional(dv); updateTiles(); }, true);
+    await sub(rowing, CH.additional, dv => { live.add = Parse.additional(dv); syncClock(live.add.elapsedTime); updateTiles(); }, true);
     await sub(rowing, CH.stroke, dv => onStrokeRecord(Parse.stroke(dv)), true);
     await sub(rowing, CH.addStroke, dv => onAddStroke(Parse.addStroke(dv)), false);
 
     const fc = await sub(rowing, CH.forceCurve, onForceCurvePacket, false);
+    try {
+      const ctrl = await BLE.server.getPrimaryService(SVC.control);
+      BLE.ctrlTx = await ctrl.getCharacteristic(CH.ctrlTx);
+      await sub(ctrl, CH.ctrlRx, dv => Csafe.onRx(dv), true);
+    } catch (e) { BLE.ctrlTx = null; log('Control channel unavailable: ' + e.message); }
     if (fc) { live.forceSource = 'ble'; log('Force curves: PM5 force curve characteristic (0x003D)'); }
+    else if (BLE.ctrlTx) { live.forceSource = 'csafe'; log('Force curves: CSAFE polling fallback'); }
     else {
-      try {
-        const ctrl = await BLE.server.getPrimaryService(SVC.control);
-        BLE.ctrlTx = await ctrl.getCharacteristic(CH.ctrlTx);
-        await sub(ctrl, CH.ctrlRx, dv => Csafe.onRx(dv), true);
-        live.forceSource = 'csafe';
-        log('Force curves: CSAFE polling fallback');
-      } catch (e) {
-        live.forceSource = null;
-        log('No force curve source available: ' + e.message);
-        toast('Connected, but this PM5 is not sending force curves');
-      }
+      live.forceSource = null;
+      log('No force curve source available');
+      toast('Connected, but this PM5 is not sending force curves');
     }
+    if (liveDrawOn) LiveDraw.start();
     if (session) session.forceSource = live.forceSource;
     setStatus();
     toast('PM5 connected – start rowing');
@@ -756,6 +835,7 @@ function demoStroke() {
   put24(a,0,Math.round(demo.t*100)); put16(a,3,Math.round(500/pace*1000)); a[5]=rate; a[6]=150+Math.round(fatigue*15);
   put16(a,7,Math.round(pace*100)); put16(a,9,Math.round(pace*100));
   live.add = Parse.additional(demoPacket(a));
+  syncClock(live.add.elapsedTime);
   // 0x0031 general status
   const g = new Array(19).fill(0);
   put24(g,0,Math.round(demo.t*100)); put24(g,3,Math.round(demo.d*10)); g[18]=118;
@@ -765,7 +845,7 @@ function demoStroke() {
   put24(s,0,Math.round(demo.t*100)); put24(s,3,Math.round(demo.d*10)); s[6]=Math.round(142 - 6*fatigue);
   s[7]=Math.round(strokeTime*0.33*100); put16(s,8,Math.round(strokeTime*0.67*100)); put16(s,10,1020);
   put16(s,12,Math.round(Math.max(...raw)*10)); put16(s,14,Math.round(mean(raw)*10)); put16(s,16,6000); put16(s,18,demo.n);
-  onStrokeRecord(Parse.stroke(demoPacket(s)));
+  const sendRest = () => {
   // 0x0036 additional stroke data
   const as = new Array(15).fill(0);
   put24(as,0,Math.round(demo.t*100)); put16(as,3,watts); put16(as,7,demo.n);
@@ -777,10 +857,20 @@ function demoStroke() {
     ch.forEach(x => p.push(x & 255, x >> 8));
     onForceCurvePacket(demoPacket(p));
   });
+  };
+  if (liveDrawOn && !demo.fast) {        // simulate the curve arriving during the drive
+    let i = 0;
+    const step = () => {
+      if (!demo.on) return;
+      if (i < raw.length) { LiveDraw.buf.push(...raw.slice(i, i + 3)); i += 3; drawLive(); setTimeout(step, 90); }
+      else { LiveDraw.buf = []; onStrokeRecord(Parse.stroke(demoPacket(s))); sendRest(); }
+    };
+    step();
+  } else { onStrokeRecord(Parse.stroke(demoPacket(s))); sendRest(); }
 }
 function startDemo(fast) {
   if (demo.on) return;
-  demo.on = true; demo.n = 0; demo.t = 0; demo.d = 0;
+  demo.on = true; demo.fast = !!fast; demo.n = 0; demo.t = 0; demo.d = 0;
   live.forceSource = 'demo';
   demo.h = setInterval(demoStroke, fast ? 20 : 2800);
   $('btnDemo').textContent = 'Stop demo';
@@ -871,12 +961,36 @@ function updateTiles() {
   $('tWatts').textContent = (last && last.watts) || live.addStroke.power || '–';
   $('tPeak').textContent = last && last.peakLb ? Math.round(fConv(last.peakLb)) : '–';
   $('tPeak').nextElementSibling.textContent = 'peak ' + uLabel();
-  $('tTime').textContent = fmtTime(live.general.elapsedTime);
   $('tDist').textContent = live.general.distance != null ? Math.round(live.general.distance) : '–';
   $('tStrokes').textContent = session ? session.strokes.length : '–';
   $('tDrive').textContent = last && last.driveLen ? last.driveLen.toFixed(2) : '–';
   if (session) setStatus();
 }
+/* Smooth workout clock: the phone ticks on its own between PM5 messages and
+   re-anchors to the PM5's elapsed time every time one arrives. It only runs
+   while the PM5's time is actually advancing, and stops if messages stop. */
+const clock = { pm: null, at: 0, running: false, shown: null };
+function syncClock(t) {
+  if (t == null || isNaN(t)) return;
+  const now = performance.now();
+  if (clock.pm != null) {
+    if (t > clock.pm + 0.001) clock.running = true;
+    else if (t < clock.pm - 0.5) clock.running = false;          // PM5 reset for a new piece
+    else if (now - clock.at > 1500) clock.running = false;        // time not moving: paused / stopped
+    if (t === clock.pm) return;                                    // same timestamp: keep current anchor
+  }
+  clock.pm = t; clock.at = now;
+}
+setInterval(() => {
+  let t = clock.pm;
+  if (t != null && clock.running) {
+    const dt = (performance.now() - clock.at) / 1000;
+    t += dt < 3.5 ? dt : 0;
+    if (dt >= 3.5) clock.running = false;                          // lost contact: freeze
+  }
+  const txt = fmtTime(t);
+  if (txt !== clock.shown) { clock.shown = txt; $('tTime').textContent = txt; }
+}, 100);
 let liveDrawPending = false;
 function drawLive() {
   if (liveDrawPending) return; liveDrawPending = true;
@@ -891,7 +1005,12 @@ function drawLiveNow() {
     const avg = rs[0].map((_, i) => mean(rs.map(r => r[i])));
     withCurve.slice(-6, -1).forEach(s => series.push({ y: resample(s.curve).map(fConv), color: '#8a9bb0', alpha: .35, width: 1.5 }));
     if (rs.length > 1) series.push({ y: avg, color: '#ff9f43', width: 2, dash: [5,4] });
-    series.push({ y: rs[rs.length - 1], color: '#3ba3ff', width: 3 });
+    series.push({ y: rs[rs.length - 1], color: '#3ba3ff', width: 3, alpha: LiveDraw.buf.length ? .35 : 1 });
+  }
+  if (LiveDraw.buf.length) {
+    const lens = withCurve.slice(-5).map(s => s.curve.length);
+    const N = Math.max(LiveDraw.buf.length, lens.length ? Math.round(mean(lens)) : 25);
+    series.push({ y: LiveDraw.buf.map(fConv), x: LiveDraw.buf.map((_, i) => 100 * i / (N - 1)), color: '#2ecc71', width: 3.5 });
   }
   chart($('cLive'), { series, xMax: 100, xFmt: pctX, yLabel: uLabel(),
     empty: series.length ? null : (isConnected() || demo.on ? 'Waiting for first stroke…' : 'Connect to see your force curve') });
@@ -1163,6 +1282,13 @@ $('fileImport').onchange = async e => {
 $('btnPasteImport').onclick = async () => { if (await importText($('pasteImport').value)) $('pasteImport').value = ''; };
 $('unitSel').value = units;
 $('autoRec').checked = autoRecord;
+$('liveDraw').checked = liveDrawOn;
+$('liveDraw').onchange = e => {
+  liveDrawOn = e.target.checked;
+  try { localStorage.setItem('ergcurve-livedraw', liveDrawOn ? '1' : '0'); } catch (x) {}
+  $('liveDrawInfo').textContent = liveDrawOn ? 'On: watch for a green curve growing during the drive.' : 'Off: the curve appears when each drive finishes.';
+  if (liveDrawOn) LiveDraw.start(); else { LiveDraw.running = false; LiveDraw.buf = []; drawLive(); }
+};
 $('autoRec').onchange = e => { autoRecord = e.target.checked; try { localStorage.setItem('ergcurve-autorec', autoRecord ? '1' : '0'); } catch (x) {} updateRecButtons(); };
 $('unitSel').onchange = e => { units = e.target.value; try { localStorage.setItem('ergcurve-units', units); } catch (x) {} updateTiles(); drawLive(); };
 window.addEventListener('resize', () => { drawLive(); if (!$('viewDetail').classList.contains('hidden')) renderDetail(); });
