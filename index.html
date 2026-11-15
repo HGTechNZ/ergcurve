@@ -460,7 +460,7 @@ function onStrokeRecord(sd) {
     watts: null, curve: null,
   };
   const pc = live.pendingCurve;
-  if (pc && st.t - pc.t < 2500) { attachCurve(st, pc.raw); live.pendingCurve = null; }
+  if (pc && st.t - pc.t < 2500) { attachCurve(st, pc.raw, pc.src); live.pendingCurve = null; }
   if (session) {
     session.strokes.push(st);
     session.end = st.t;
@@ -472,23 +472,23 @@ function onStrokeRecord(sd) {
   }
   updateTiles(); drawLive();
 }
-function attachCurve(st, raw) {
-  st.curve = raw;
+function attachCurve(st, raw, src) {
+  st.curve = raw; if (src) st.curveSrc = src;
   Object.assign(st, curveMetrics(raw));
 }
-function onCurve(raw) {
+function onCurve(raw, src) {
   if (!raw || raw.length < 4) return;
   const strokes = live.strokes;
   const last = strokes[strokes.length - 1];
   if (last && !last.curve && Date.now() - last.t < 2500) {
-    attachCurve(last, raw);
+    attachCurve(last, raw, src);
     if (live.unitChecks < 5 && last.peakLb) {
       live.unitChecks++;
       log(`Unit check: curve max ${Math.max(...raw)} vs stroke peak ${last.peakLb.toFixed(1)} lb`);
     }
     scheduleSave(); updateTiles(); drawLive();
   } else {
-    live.pendingCurve = { raw, t: Date.now() };
+    live.pendingCurve = { raw, t: Date.now(), src };
   }
 }
 live.unitChecks = 0;
@@ -533,7 +533,10 @@ function onForceCurvePacket(dv) {
   FC.got++; FC.lastSeq = seq;
   if (FC.got >= FC.total) {
     const curve = FC.buf; FC.buf = []; FC.got = 0;
-    onCurve(curve);
+    // While live draw is polling, it drains the PM5's force buffer, so this curve
+    // is only the tail of the drive. The live-collected curve is saved instead.
+    if (LiveDraw.running) { LiveDraw.lastBleLen = curve.length; return; }
+    onCurve(curve, 'pm5');
   }
 }
 
@@ -650,17 +653,8 @@ const LiveDraw = {
     if (this.drives <= 8) log(`Live draw drive ${this.drives}: ${stats}`);
     drawLive();
     if (raw.length < 5) return;
-    if (live.forceSource === 'csafe') { onCurve(raw); return; }
-    const n = this.drives;
-    setTimeout(() => {   // backup: save the live curve if the normal 0x003D one never came
-      const last = live.strokes[live.strokes.length - 1];
-      if (!last || Date.now() - last.t > 4000) return;
-      if (!last.curve) {
-        attachCurve(last, raw); last.curveSrc = 'live'; this.backups++;
-        if (this.backups <= 3) log('Normal curve missing for a stroke – saved the live-draw curve instead');
-        if (session) scheduleSave(); drawLive();
-      } else if (n <= 8) log(`  compare: live ${raw.length} pts vs PM5 curve ${last.curve.length} pts`);
-    }, 1500);
+    if (this.drives <= 8 && this.lastBleLen) log(`  (PM5's own end-of-drive curve had only ${this.lastBleLen} pts – ignored)`);
+    onCurve(raw, 'live');
   },
 };
 
