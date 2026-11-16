@@ -2,6 +2,9 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<!-- Security: the page may only run its own inline code and may not load or send anything to other sites -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; connect-src 'none'; manifest-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'">
+<meta name="referrer" content="no-referrer">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
 <meta name="theme-color" content="#0f1720">
 <meta name="mobile-web-app-capable" content="yes">
@@ -281,6 +284,11 @@
     <div id="rosterList"></div>
   </div>
   <div class="card">
+    <h3>Testing</h3>
+    <p class="note">Checklist of what to test on the erg for each new version, plus the release history.</p>
+    <a class="btn" href="tests.html" style="display:inline-block;text-decoration:none">Open test checklist</a>
+  </div>
+  <div class="card">
     <h3>Connection log</h3>
     <div id="log"></div>
   </div>
@@ -311,7 +319,7 @@
 <script>
 "use strict";
 /* Bump on every release so the version at the bottom of the page shows what's loaded */
-const APP_VERSION = '5.0';
+const APP_VERSION = '5.1';
 const APP_DATE = '16 Nov 2026';
 /* =====================================================================
    PM5 Bluetooth definitions (Concept2 PM5 Bluetooth Smart Interface)

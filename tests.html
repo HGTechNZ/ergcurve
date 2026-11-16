@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src 'none'; base-uri 'none'; form-action 'none'; object-src 'none'">
+<meta name="referrer" content="no-referrer">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ErgCurve – release test checklist</title>
+<style>
+  :root { --bg:#0f1720; --panel:#17212c; --panel2:#1e2a37; --line:#2b3a4a; --text:#e8eef4; --muted:#8a9bb0; --accent:#3ba3ff; --good:#2ecc71; --bad:#ff5c5c; --warn:#ff9f43; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
+  header { padding:14px; background:var(--panel); border-bottom:1px solid var(--line); position:sticky; top:0; z-index:2; }
+  header h1 { margin:0; font-size:17px; }
+  main { padding:12px; max-width:760px; margin:0 auto; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:12px; margin:10px 0; }
+  h2 { font-size:13px; color:var(--muted); text-transform:uppercase; letter-spacing:.5px; margin:0 0 8px; }
+  .item { display:flex; gap:10px; padding:9px 2px; border-bottom:1px solid var(--line); align-items:flex-start; }
+  .item:last-child { border-bottom:0; }
+  .item input { width:22px; height:22px; flex:none; margin-top:1px; }
+  .item .how { font-size:12.5px; color:var(--muted); }
+  .tag { font-size:11px; color:var(--warn); border:1px solid #7a4a1a; border-radius:8px; padding:0 5px; margin-left:4px; white-space:nowrap; }
+  .note { font-size:12.5px; color:var(--muted); }
+  select, button { background:var(--panel2); color:var(--text); border:1px solid var(--line); border-radius:8px; padding:8px 10px; font-size:14px; }
+  .bar { height:8px; background:var(--panel2); border-radius:4px; overflow:hidden; margin-top:8px; }
+  .bar i { display:block; height:100%; background:var(--good); width:0; }
+  a { color:var(--accent); }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  td { padding:6px 4px; border-bottom:1px solid var(--line); vertical-align:top; }
+  td:first-child { white-space:nowrap; color:var(--accent); font-weight:600; }
+</style>
+</head>
+<body>
+<header><h1>ErgCurve – release test checklist</h1></header>
+<main>
+  <div class="card">
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <span>Testing version</span><select id="ver"></select>
+      <button id="reset">Clear ticks</button>
+      <a href="./" style="margin-left:auto">← Back to app</a>
+    </div>
+    <div class="bar"><i id="prog"></i></div>
+    <p class="note" id="progText"></p>
+    <p class="note">Every release, Claude runs 28 automated checks with simulated data before pushing (tests/run_tests.py). This list covers what only a real erg and your phone can prove. Items tagged with a version are bugs we've fixed before, so if one fails, it has come back.</p>
+  </div>
+  <div id="lists"></div>
+
+  <div class="card">
+    <h2>Release history</h2>
+    <table id="history"></table>
+  </div>
+</main>
+<script>
+"use strict";
+// Newest first. Add a row for every release.
+const RELEASES = [
+  ['5.1', 'Security lockdown (page can\'t load or send anything to other sites), automated test suite, this checklist page'],
+  ['5.0', 'Multi-erg mode (up to 8 PM5s; List / Gallery / Single views; record all). Saved rower names with you pinned first'],
+  ['4.4', 'Rower name prompt on Start recording; rower filter in Sessions'],
+  ['4.3', 'FIX: time and metres included the warm-up. Now count from Start recording'],
+  ['4.2', 'Version number at bottom of page'],
+  ['4.1', 'FIX: with live draw on, saved curves sloped downwards (only the back half of the drive). Now saves the full live curve'],
+  ['4.0', 'Experimental live draw; smooth ticking clock'],
+  ['3.0', 'Manual Start recording (warm-up not saved); stroke-range and drive-length filters'],
+  ['2.0', 'Copy-to-clipboard export and paste import for Bluefy'],
+  ['1.0', 'First version: record, save and analyse force curves. FIX: live page grew endlessly tall'],
+];
+const CHECKS = [
+  ['Before the erg', [
+    ['Version at the bottom of the app matches the version you\'re testing', 'Pull down to refresh in Bluefy if it shows an older one'],
+    ['Demo: blue curves appear and the session saves to Sessions', 'Live tab → Demo → Start recording → Finish'],
+    ['Screen stays on while connected', 'Leave the phone untouched longer than your Auto-Lock time'],
+  ]],
+  ['Single erg – live draw OFF', [
+    ['Connect PM5 finds the erg and connects', 'Close ErgData first'],
+    ['Warm-up strokes show live but Strokes tile stays "–"', 'Nothing saved before Start recording', '3.0'],
+    ['Start recording: Time shows 0:00 and Metres 0', 'Not the PM5\'s warm-up total', '4.3'],
+    ['Name picker shows your name first, plus every name used before', '', '5.0'],
+    ['Each curve rises, peaks and falls, a normal stroke shape', ''],
+    ['Curve peak roughly matches the PEAK N tile', 'Checks the force units are right'],
+    ['Clock ticks smoothly and freezes when you stop rowing', '', '4.2'],
+    ['Page doesn\'t keep getting longer as you row', '', '1.0'],
+  ]],
+  ['Single erg – live draw ON', [
+    ['Green curve grows during the drive', 'Text under the switch shows several updates per drive'],
+    ['Saved curves are normal shape, NOT sloping down from the left', 'Check the session\'s average curve afterwards', '4.1'],
+  ]],
+  ['After the session', [
+    ['Session appears in Sessions with the rower\'s name', ''],
+    ['Summary time and distance only count recorded strokes', '', '4.3'],
+    ['From / To stroke and Min drive length filters change the stroke count', '', '3.0'],
+    ['Export (CSV or Copy) works from Bluefy', 'Share sheet or Copy option', '2.0'],
+    ['Backup & info → Export all sessions works', ''],
+  ]],
+  ['Multi erg (2+ ergs)', [
+    ['Switch to Multi erg; 8 slots show', ''],
+    ['Connect two ergs, one slot each, naming each rower', 'Match PM5 numbers to the monitors'],
+    ['List view: both rowers\' numbers update', ''],
+    ['Gallery view: both curves update after each stroke; tap opens Single', ''],
+    ['Single view: swipe changes rower', ''],
+    ['Start recording all → Finish & save all gives one session per rower', ''],
+    ['Neither erg dropped out during the test', 'If one did, screenshot the Connection log'],
+  ]],
+];
+const $ = id => document.getElementById(id);
+let ticks = {};
+const key = () => 'ergcurve-tests-' + $('ver').value;
+function load() { try { ticks = JSON.parse(localStorage.getItem(key()) || '{}'); } catch (e) { ticks = {}; } }
+function save() { try { localStorage.setItem(key(), JSON.stringify(ticks)); } catch (e) {} }
+function render() {
+  const el = $('lists'); el.innerHTML = '';
+  let total = 0, done = 0;
+  CHECKS.forEach(([title, items], g) => {
+    const card = document.createElement('div'); card.className = 'card';
+    const h = document.createElement('h2'); h.textContent = title; card.appendChild(h);
+    items.forEach(([what, how, fixedIn], k) => {
+      const id = g + '-' + k; total++; if (ticks[id]) done++;
+      const row = document.createElement('label'); row.className = 'item';
+      const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = !!ticks[id];
+      cb.onchange = () => { ticks[id] = cb.checked; save(); render(); };
+      const body = document.createElement('div');
+      const t = document.createElement('div'); t.textContent = what;
+      if (fixedIn) { const tag = document.createElement('span'); tag.className = 'tag'; tag.textContent = 'v' + fixedIn; t.appendChild(tag); }
+      body.appendChild(t);
+      if (how) { const hw = document.createElement('div'); hw.className = 'how'; hw.textContent = how; body.appendChild(hw); }
+      row.append(cb, body); card.appendChild(row);
+    });
+    el.appendChild(card);
+  });
+  $('prog').style.width = (100 * done / total) + '%';
+  $('progText').textContent = `${done} of ${total} checked for v${$('ver').value}`;
+}
+RELEASES.forEach(([v, what]) => {
+  const o = document.createElement('option'); o.value = v; o.textContent = 'v' + v; $('ver').appendChild(o);
+  const tr = document.createElement('tr'); const a = document.createElement('td'); a.textContent = 'v' + v;
+  const b = document.createElement('td'); b.textContent = what; tr.append(a, b); $('history').appendChild(tr);
+});
+$('ver').onchange = () => { load(); render(); };
+$('reset').onclick = () => { ticks = {}; save(); render(); };
+load(); render();
+</script>
+</body>
+</html>
