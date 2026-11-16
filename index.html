@@ -72,6 +72,8 @@
   .legend { display:flex; gap:12px; flex-wrap:wrap; font-size:12px; color:var(--muted); margin-top:6px; }
   .legend i { display:inline-block; width:14px; height:3px; vertical-align:middle; margin-right:4px; }
   .hidden { display:none !important; }
+  .leader { border-color:#2ecc71 !important; box-shadow:0 0 0 2px #2ecc71, 0 0 16px #2ecc7166; transition:box-shadow .3s; }
+  .leadBadge { color:#2ecc71; font-weight:700; font-size:12px; }
   #log { font:11px/1.35 ui-monospace,Menlo,monospace; color:var(--muted); white-space:pre-wrap;
     max-height:180px; overflow:auto; }
   .seg { display:flex; gap:4px; flex-wrap:wrap; margin-bottom:8px; }
@@ -169,6 +171,9 @@
     <label style="display:flex;gap:10px;align-items:center;margin-top:8px">
       <input type="checkbox" class="idealToggle" id="idealMulti" style="width:22px;height:22px">
       <span>Show ideal curve <i style="display:inline-block;width:18px;height:0;border-top:3px dashed #c084fc;vertical-align:middle"></i></span></label>
+    <label style="display:flex;gap:10px;align-items:center;margin-top:8px">
+      <input type="checkbox" id="leaderToggle" style="width:22px;height:22px">
+      <span>Highlight the leader <span class="note">(highest watts, average of last 3 strokes)</span></span></label>
     <p class="note">Multi mode: live draw is off, curves appear after each drive. Use the button top right to switch List / Gallery / Single.</p>
   </div>
 </section>
@@ -345,7 +350,7 @@
 <script>
 "use strict";
 /* Bump on every release so the version at the bottom of the page shows what's loaded */
-const APP_VERSION = '5.2';
+const APP_VERSION = '5.3';
 const APP_DATE = '16 Nov 2026';
 /* =====================================================================
    PM5 Bluetooth definitions (Concept2 PM5 Bluetooth Smart Interface)
@@ -1829,6 +1834,23 @@ function renderSingleErg() {
   el.dataset.slot = s.i;
   updateMultiNumbers(); drawMultiCurves();
 }
+/* Leader highlight: highest average watts over each rower's last 3 strokes.
+   Ignores ergs whose last stroke is more than 10 s old (stopped rowing). */
+let leaderOn = true;
+try { leaderOn = localStorage.getItem('ergcurve-leader') !== '0'; } catch (e) {}
+function avg3(s) {
+  const st = s.strokes.filter(x => x.watts != null).slice(-3);
+  if (st.length < 3 || Date.now() - st[st.length - 1].t > 10000) return null;
+  const paces = st.map(x => x.pace).filter(p => p && p < 600);
+  return { watts: mean(st.map(x => x.watts)), pace: paces.length ? mean(paces) : null };
+}
+function currentLeader() {
+  if (!leaderOn) return null;
+  const c = liveErgs().map(s => ({ s, a: avg3(s) })).filter(x => x.a);
+  if (c.length < 2) return null;
+  c.sort((x, y) => y.a.watts - x.a.watts);
+  return c[0].a.watts > c[1].a.watts ? c[0].s : null;     // exact tie: no highlight
+}
 let multiQueued = false, multiCurveDirty = false;
 function queueMulti(curves) {
   if (curves) multiCurveDirty = true;
@@ -1837,9 +1859,19 @@ function queueMulti(curves) {
 }
 function updateMultiNumbers() {
   if (appMode !== 'multi' || $('viewLive').classList.contains('hidden')) return;
+  const lead = currentLeader();
   document.querySelectorAll('#multiWrap [data-slot]').forEach(card => {
     const s = ergs[+card.dataset.slot]; if (!s || s.state === 'empty') return;
     const N = ergNumbers(s);
+    const isLead = s === lead;
+    (card.id === 'mSingle' ? card.querySelector('.tiles') : card).classList.toggle('leader', isLead);
+    const a3 = avg3(s);
+    let a3El = card.querySelector('.avg3');
+    if (!a3El) { a3El = document.createElement('div'); a3El.className = 'note avg3'; a3El.style.marginTop = '4px';
+      const anchor = card.querySelector('.sub') || card.querySelector('.tiles'); if (anchor) anchor.after(a3El); }
+    a3El.innerHTML = '';
+    if (isLead) { const b = document.createElement('span'); b.className = 'leadBadge'; b.textContent = '▲ Leading  '; a3El.appendChild(b); }
+    a3El.appendChild(document.createTextNode(a3 ? `3-stroke avg: ${fmtSplit(a3.pace)} · ${Math.round(a3.watts)} W` : '3-stroke avg: –'));
     const st = s.strokes, last = st[st.length - 1];
     N.drive = last && last.driveLen ? last.driveLen.toFixed(2) : '–';
     card.querySelectorAll('[data-k]').forEach(v => { const val = N[v.dataset.k]; if (val != null && v.textContent !== String(val)) v.textContent = val; });
@@ -1898,6 +1930,8 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
 $('modeSeg').querySelectorAll('button').forEach(b => b.onclick = () => setMode(b.dataset.m));
 $('btnView').onclick = () => { const k = VIEWS.findIndex(v => v[0] === multiView); setView(VIEWS[(k + 1) % VIEWS.length][0]); };
 $('mRecord').onclick = () => multiStart();
+$('leaderToggle').checked = leaderOn;
+$('leaderToggle').onchange = e => { leaderOn = e.target.checked; try { localStorage.setItem('ergcurve-leader', leaderOn ? '1' : '0'); } catch (x) {} updateMultiNumbers(); };
 $('mFinish').onclick = () => multiFinish();
 $('mDemo').onclick = () => { const s = ergs.find(x => x.state === 'empty'); if (!s) { toast('All 8 slots are in use'); return; }
   s.rower = s.rower || ['Sam','Tom','Jack','Liam','Noah','Ben','Will','Max'][s.i]; s.startDemo(); };

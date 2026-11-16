@@ -138,6 +138,14 @@ async def main():
         await pg.wait_for_timeout(1500)
         check('Three demo ergs connected (v5.0)', await pg.evaluate('liveErgs().length') == 3)
         await pg.click('#mRecord'); await pg.wait_for_timeout(2500)
+        n_lead = await pg.evaluate("document.querySelectorAll('#mList .leader').length")
+        check('Exactly one rower highlighted as leader (v5.3)', n_lead == 1, str(n_lead))
+        check('Leader is the highest 3-stroke-average watts (v5.3)', await pg.evaluate(
+            "(() => { const L = currentLeader(); return liveErgs().every(s => s === L || avg3(s).watts <= avg3(L).watts); })()"))
+        check('3-stroke average shown for each rower (v5.3)', await pg.evaluate("document.querySelectorAll('#mList .avg3').length") == 3)
+        await pg.click('#leaderToggle'); await pg.wait_for_timeout(300)
+        check('Leader highlight can be switched off (v5.3)', await pg.evaluate("document.querySelectorAll('#mList .leader').length") == 0)
+        await pg.click('#leaderToggle')
         check('Start recording all records every erg', await pg.evaluate('ergs.filter(s => s.session && s.session.strokes.length > 1).length') == 3)
         for v in ['Gallery', 'Single']:
             await pg.click('#btnView'); await pg.wait_for_timeout(400)

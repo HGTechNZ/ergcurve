@@ -54,6 +54,7 @@
 "use strict";
 // Newest first. Add a row for every release.
 const RELEASES = [
+  ['5.3', 'Multi mode: green highlight on the leader (highest watts, 3-stroke average) and each rower\'s 3-stroke average split and watts'],
   ['5.2', 'Ideal curve: adjustable target shape in Settings, shown on live, multi and session charts, with an on/off toggle on each. "Backup & info" renamed Settings'],
   ['5.1', 'Security lockdown (page can\'t load or send anything to other sites), automated test suite, this checklist page'],
   ['5.0', 'Multi-erg mode (up to 8 PM5s; List / Gallery / Single views; record all). Saved rower names with you pinned first'],
@@ -106,6 +107,8 @@ const CHECKS = [
     ['Gallery view: both curves update after each stroke; tap opens Single', ''],
     ['Single view: swipe changes rower', ''],
     ['Start recording all → Finish & save all gives one session per rower', ''],
+    ['Leader (highest watts, last 3 strokes) glows green and switches when someone else pulls harder', '', '5.3'],
+    ['3-stroke average split and watts shown for each rower', '', '5.3'],
     ['Neither erg dropped out during the test', 'If one did, screenshot Settings → Connection log'],
   ]],
 ];
