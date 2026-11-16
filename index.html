@@ -88,7 +88,10 @@
 <body>
 <header>
   <h1>ErgCurve</h1>
-  <div id="status"><span id="dot" class="dot"></span><span id="statusText">Not connected</span></div>
+  <div style="display:flex;align-items:center;gap:10px">
+    <div id="status"><span id="dot" class="dot"></span><span id="statusText">Not connected</span></div>
+    <button id="btnView" class="btn small hidden" title="Change view"></button>
+  </div>
 </header>
 <nav>
   <button id="tabLive" class="active">Live</button>
@@ -100,6 +103,9 @@
 <!-- ===================== LIVE ===================== -->
 <section id="viewLive">
   <div id="noBt" class="warnbox hidden"></div>
+  <div class="seg" id="modeSeg" style="margin-bottom:10px">
+    <button data-m="single">Single erg</button><button data-m="multi">Multi erg</button></div>
+  <div id="singleWrap">
   <div class="row">
     <button id="btnConnect" class="btn primary grow">Connect PM5</button>
     <button id="btnDemo" class="btn">Demo</button>
@@ -142,6 +148,19 @@
       <span><i style="background:var(--accent)"></i>peak force (N)</span>
       <span><i style="background:var(--accent2)"></i>peak position (% of drive)</span>
     </div>
+  </div>
+  </div><!-- /singleWrap -->
+  <div id="multiWrap" class="hidden">
+    <div class="row">
+      <button id="mRecord" class="btn warn grow hidden">● Start recording all</button>
+      <button id="mFinish" class="btn warn grow hidden">Finish &amp; save all</button>
+      <button id="mDemo" class="btn">+ Demo erg</button>
+    </div>
+    <p class="note" id="mNote"></p>
+    <div id="mList"></div>
+    <div id="mGallery" class="hidden" style="display:grid;grid-template-columns:1fr 1fr;gap:8px"></div>
+    <div id="mSingle" class="hidden"></div>
+    <p class="note">Multi mode: live draw is off, curves appear after each drive. Use the button top right to switch List / Gallery / Single.</p>
   </div>
 </section>
 
@@ -255,6 +274,13 @@
     <p class="note">Off (default): you tap <b>Start recording</b> after your warm-up, so warm-up and drills never touch your averages.</p>
   </div>
   <div class="card">
+    <h3>Rower names</h3>
+    <label class="f">Your name (always first in the list)</label>
+    <input type="text" id="meName" autocapitalize="words">
+    <label class="f">Saved names</label>
+    <div id="rosterList"></div>
+  </div>
+  <div class="card">
     <h3>Connection log</h3>
     <div id="log"></div>
   </div>
@@ -269,8 +295,8 @@
 <div id="toast"></div>
 <div id="rowerModal" class="hidden" style="position:fixed;inset:0;background:#0009;display:flex;align-items:center;justify-content:center;z-index:30;padding:20px">
   <div class="box" style="background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px;max-width:380px;width:100%">
-    <b>Who's rowing?</b>
-    <p class="note" style="margin:4px 0 8px">Recording has already started. The name labels this session.</p>
+    <b id="rowerTitle">Who's rowing?</b>
+    <p class="note" id="rowerNote" style="margin:4px 0 8px"></p>
     <input type="text" id="rowerInput" placeholder="Rower name" autocomplete="off" autocapitalize="words">
     <div class="seg" id="rowerChips" style="margin-top:8px"></div>
     <div class="row" style="margin-top:12px;justify-content:flex-end">
@@ -285,7 +311,7 @@
 <script>
 "use strict";
 /* Bump on every release so the version at the bottom of the page shows what's loaded */
-const APP_VERSION = '4.4';
+const APP_VERSION = '5.0';
 const APP_DATE = '16 Nov 2026';
 /* =====================================================================
    PM5 Bluetooth definitions (Concept2 PM5 Bluetooth Smart Interface)
@@ -795,6 +821,7 @@ document.addEventListener('visibilitychange', () => {
 
 const isConnected = () => !!(BLE.device && BLE.device.gatt && BLE.device.gatt.connected);
 function setStatus(text) {
+  if (typeof appMode !== 'undefined' && appMode === 'multi') { multiStatus(); return; }
   const dot = $('dot');
   const conn = isConnected() || demo.on;
   dot.className = 'dot' + (session ? ' rec' : conn ? ' on' : '');
@@ -1270,7 +1297,7 @@ function show(view) {
   $('tabLive').classList.toggle('active', view === 'viewLive');
   $('tabSessions').classList.toggle('active', view === 'viewSessions' || view === 'viewDetail');
   $('tabMore').classList.toggle('active', view === 'viewMore');
-  if (view === 'viewLive') drawLive();
+  if (view === 'viewLive') { drawLive(); renderMulti(); }
   if (view === 'viewSessions') renderSessionList();
   window.scrollTo(0, 0);
 }
@@ -1281,28 +1308,16 @@ $('btnBack').onclick = () => show('viewSessions');
 $('rowerFilter').onchange = () => renderSessionList();
 $('btnConnect').onclick = () => (isConnected() ? disconnect() : connect());
 $('btnDemo').onclick = () => (demo.on ? stopDemo() : startDemo());
-$('btnRecord').onclick = () => { startRecording(); askRower(); };
+$('btnRecord').onclick = async () => {
+  startRecording();
+  const n = await pickRower("Who's rowing?", 'Recording has already started. The name labels this session.');
+  if (session && n) { session.rower = n; saveSession(); setStatus(); toast('Recording ' + n); }
+};
 async function knownRowers() {
   try { const all = await DB.all(); const seen = new Map();
     all.sort((a, b) => b.start - a.start).forEach(s => { const r = (s.rower || '').trim(); if (r && !seen.has(r.toLowerCase())) seen.set(r.toLowerCase(), r); });
     return [...seen.values()];
   } catch (e) { return []; }
-}
-async function askRower() {
-  const names = await knownRowers();
-  $('rowerInput').value = '';
-  const chips = $('rowerChips'); chips.innerHTML = '';
-  names.slice(0, 16).forEach(n => { const b = document.createElement('button'); b.textContent = n;
-    b.onclick = () => done(n); chips.appendChild(b); });
-  $('rowerModal').classList.remove('hidden');
-  function done(name) {
-    $('rowerModal').classList.add('hidden');
-    name = (name || '').trim();
-    if (session && name) { session.rower = name; saveSession(); setStatus(); toast('Recording ' + name); }
-  }
-  $('rowerOk').onclick = () => done($('rowerInput').value);
-  $('rowerSkip').onclick = () => done('');
-  $('rowerInput').onkeydown = e => { if (e.key === 'Enter') done($('rowerInput').value); };
 }
 $('btnFinish').onclick = async () => { if (await confirmBox('Finish and save this session?')) { stopDemo(); finishSession(false); } };
 ['fMin','fMax','fFrom','fTo','fLen'].forEach(k => $(k).oninput = () => renderDetail());
@@ -1347,9 +1362,483 @@ $('liveDraw').onchange = e => {
   if (liveDrawOn) LiveDraw.start(); else { LiveDraw.running = false; LiveDraw.buf = []; drawLive(); }
 };
 $('autoRec').onchange = e => { autoRecord = e.target.checked; try { localStorage.setItem('ergcurve-autorec', autoRecord ? '1' : '0'); } catch (x) {} updateRecButtons(); };
-$('unitSel').onchange = e => { units = e.target.value; try { localStorage.setItem('ergcurve-units', units); } catch (x) {} updateTiles(); drawLive(); };
+$('unitSel').onchange = e => { units = e.target.value; try { localStorage.setItem('ergcurve-units', units); } catch (x) {} updateTiles(); drawLive(); renderMulti(); };
 window.addEventListener('resize', () => { drawLive(); if (!$('viewDetail').classList.contains('hidden')) renderDetail(); });
 window.addEventListener('beforeunload', () => { saveSession(); });
+
+/* =====================================================================
+   Rower roster: every name used is remembered; your own name is pinned first
+   ===================================================================== */
+function myName() { try { return (localStorage.getItem('ergcurve-me') ?? 'Harry').trim(); } catch (e) { return 'Harry'; } }
+function getRoster() { try { return JSON.parse(localStorage.getItem('ergcurve-roster') || '[]'); } catch (e) { return []; } }
+function setRoster(r) { try { localStorage.setItem('ergcurve-roster', JSON.stringify(r.slice(0, 60))); } catch (e) {} }
+function addToRoster(n) {
+  n = (n || '').trim(); if (!n) return;
+  setRoster([n, ...getRoster().filter(x => x.toLowerCase() !== n.toLowerCase())]);
+}
+async function rosterNames() {
+  const out = [], seen = new Set();
+  const push = n => { n = (n || '').trim(); if (n && !seen.has(n.toLowerCase())) { seen.add(n.toLowerCase()); out.push(n); } };
+  push(myName());
+  getRoster().forEach(push);
+  (await knownRowers()).forEach(push);
+  return out;
+}
+/* Shows the name picker; resolves to a name, '' (skip) */
+async function pickRower(title, note) {
+  const names = await rosterNames();
+  $('rowerTitle').textContent = title || "Who's rowing?";
+  $('rowerNote').textContent = note || '';
+  $('rowerInput').value = '';
+  const chips = $('rowerChips'); chips.innerHTML = '';
+  return new Promise(res => {
+    const done = name => {
+      $('rowerModal').classList.add('hidden');
+      name = (name || '').trim();
+      if (name) addToRoster(name);
+      res(name);
+    };
+    names.slice(0, 30).forEach((n, i) => { const b = document.createElement('button'); b.textContent = n;
+      if (i === 0 && n === myName()) b.className = 'active';
+      b.onclick = () => done(n); chips.appendChild(b); });
+    $('rowerOk').onclick = () => done($('rowerInput').value);
+    $('rowerSkip').onclick = () => done('');
+    $('rowerInput').onkeydown = e => { if (e.key === 'Enter') done($('rowerInput').value); };
+    $('rowerModal').classList.remove('hidden');
+  });
+}
+function renderRosterEditor() {
+  const el = $('rosterList'); if (!el) return;
+  const r = getRoster();
+  el.innerHTML = r.length ? '' : '<p class="note">No saved names yet. Names are added when you use them.</p>';
+  r.forEach(n => {
+    const row = document.createElement('div'); row.className = 'sess';
+    row.innerHTML = '<div class="t"></div><button class="btn small danger">Remove</button>';
+    row.querySelector('.t').textContent = n;
+    row.querySelector('button').onclick = () => { setRoster(getRoster().filter(x => x !== n)); renderRosterEditor(); };
+    el.appendChild(row);
+  });
+}
+
+/* =====================================================================
+   MULTI-ERG MODE: up to 8 PM5s at once, one session per erg.
+   Self-contained so single-erg mode is untouched. Live draw is not used
+   here (too much Bluetooth traffic); curves come from 0x003D after each drive.
+   ===================================================================== */
+const MAX_ERGS = 8;
+let appMode = 'single';
+try { appMode = localStorage.getItem('ergcurve-mode') === 'multi' ? 'multi' : 'single'; } catch (e) {}
+let multiView = 'list';
+try { multiView = localStorage.getItem('ergcurve-mview') || 'list'; } catch (e) {}
+let multiRecording = false, multiGroup = null, singleIndex = 0;
+
+class ErgSlot {
+  constructor(i) { this.i = i; this.reset(); }
+  reset() {
+    this.device = null; this.server = null; this.wantConnected = false; this.demoTimer = null;
+    this.state = 'empty';            // empty | connecting | connected | lost | demo
+    this.serial = ''; this.name = ''; this.rower = this.rower || '';
+    this.general = {}; this.add = {}; this.lastWatts = null;
+    this.preview = []; this.session = null; this.pending = null; this.lastCount = -1;
+    this.fc = { buf: [], got: 0, total: 0, lastSeq: -1 };
+    this.rec = { time: 0, dist: 0, lastT: null, lastD: null };
+    this.saveTimer = null; this.noCurve = false;
+  }
+  get live() { return this.state === 'connected' || this.state === 'demo'; }
+  get strokes() { return this.session ? this.session.strokes : this.preview; }
+  label() { return this.rower || `Erg ${this.i + 1}`; }
+
+  async connect() {
+    if (!navigator.bluetooth) { showNoBt(); toast('This browser can\'t use Bluetooth'); return; }
+    let dev;
+    try {
+      dev = await navigator.bluetooth.requestDevice({
+        filters: [{ services: [SVC.discovery] }, { namePrefix: 'PM5' }],
+        optionalServices: [SVC.info, SVC.control, SVC.rowing],
+      });
+    } catch (e) { if (e.name !== 'NotFoundError') toast(e.message); return; }
+    if (ergs.some(s => s !== this && s.device && s.device.id === dev.id && s.live)) { toast('That PM5 is already connected in another slot'); return; }
+    this.device = dev; this.wantConnected = true; this.name = dev.name || '';
+    dev.addEventListener('gattserverdisconnected', () => this.onDisconnected());
+    await this.setup();
+    // name it straight away so the slot is labelled
+    if (this.live && !this.rower) this.setRower(await pickRower(`Who's on ${this.name || 'this erg'}?`, 'Pick a name, or Skip and set it later by tapping the name.'));
+  }
+  async setup() {
+    this.state = 'connecting'; renderMulti();
+    try {
+      this.server = await this.device.gatt.connect();
+      try {
+        const info = await this.server.getPrimaryService(SVC.info);
+        this.serial = new TextDecoder().decode(await (await info.getCharacteristic(CH.serial)).readValue()).replace(/\0/g, '').trim();
+      } catch (e) {}
+      const rowing = await this.server.getPrimaryService(SVC.rowing);
+      try { await (await rowing.getCharacteristic(CH.sampleRate)).writeValue(new Uint8Array([1])); } catch (e) {}   // 500 ms
+      const on = async (uuid, fn, required) => {
+        try { const c = await rowing.getCharacteristic(uuid);
+          c.addEventListener('characteristicvaluechanged', e => { try { fn(e.target.value); } catch (err) { log(`Erg ${this.i+1} handler error: ${err.message}`); } });
+          await c.startNotifications(); return true;
+        } catch (e) { if (required) throw e; return false; }
+      };
+      await on(CH.general, dv => this.onGeneral(Parse.general(dv)), true);
+      await on(CH.additional, dv => { this.add = Parse.additional(dv); queueMulti(); }, true);
+      await on(CH.stroke, dv => this.onStroke(Parse.stroke(dv)), true);
+      await on(CH.addStroke, dv => this.onAddStroke(Parse.addStroke(dv)), false);
+      const fc = await on(CH.forceCurve, dv => this.onCurvePacket(dv), false);
+      this.noCurve = !fc;
+      this.state = 'connected';
+      log(`Multi: erg ${this.i + 1} connected (${this.name}${this.serial ? ', serial ' + this.serial : ''})${fc ? '' : ' – no force curves from this PM5'}`);
+      if (!fc) toast(`${this.name}: connected, but it isn't sending force curves`);
+      if (multiRecording && !this.session) this.startRecording(multiGroup);
+      keepAwake();
+    } catch (e) {
+      log(`Multi: erg ${this.i + 1} connection failed: ${e.message}`);
+      toast('Connection failed: ' + e.message);
+      this.state = this.wantConnected ? 'lost' : 'empty';
+    }
+    renderMulti();
+  }
+  async onDisconnected() {
+    if (this.state === 'demo') return;
+    log(`Multi: erg ${this.i + 1} disconnected`);
+    this.state = 'lost'; renderMulti();
+    for (let k = 1; k <= 5 && this.wantConnected; k++) {
+      await sleep(1500 * k);
+      if (!this.wantConnected || (this.device && this.device.gatt.connected)) break;
+      log(`Multi: erg ${this.i + 1} reconnect attempt ${k}`);
+      try { await this.setup(); } catch (e) {}
+      if (this.state === 'connected') return;
+    }
+  }
+  disconnect() {
+    this.wantConnected = false;
+    clearInterval(this.demoTimer);
+    if (this.session) this.finish();
+    try { this.device && this.device.gatt.disconnect(); } catch (e) {}
+    const rower = this.rower; this.reset(); this.rower = rower;
+    renderMulti();
+  }
+  setRower(n) {
+    n = (n || '').trim(); if (!n) return;
+    this.rower = n;
+    if (this.session) { this.session.rower = n; this.save(); }
+    renderMulti();
+  }
+
+  /* --- data --- */
+  onGeneral(g) {
+    this.general = g;
+    if (this.session) {
+      const r = this.rec;
+      if (r.lastT != null) { const d = g.elapsedTime - r.lastT; if (d > 0 && d < 5) r.time += d; }
+      if (r.lastD != null) { const d = g.distance - r.lastD; if (d > 0 && d < 100) r.dist += d; }
+    }
+    this.rec.lastT = g.elapsedTime; this.rec.lastD = g.distance;
+    queueMulti();
+  }
+  onStroke(sd) {
+    if (sd.strokeCount === this.lastCount) return;
+    this.lastCount = sd.strokeCount;
+    const st = { t: Date.now(), n: sd.strokeCount, time: sd.elapsedTime, dist: sd.distance,
+      driveLen: sd.driveLength, driveTime: sd.driveTime, recTime: sd.recoveryTime, strokeDist: sd.strokeDistance,
+      peakLb: sd.peakForceLb, avgLb: sd.avgForceLb, work: sd.work,
+      rate: this.add.strokeRate ?? null, pace: this.add.currentPace ?? null, hr: this.add.heartRate || null,
+      watts: null, curve: null };
+    if (this.pending && st.t - this.pending.t < 2500) { attachCurve(st, this.pending.raw, 'pm5'); this.pending = null; }
+    if (this.session) { this.session.strokes.push(st); this.session.end = st.t; this.save(); }
+    else { this.preview.push(st); if (this.preview.length > 30) this.preview.shift(); }
+    queueMulti(true);
+  }
+  onAddStroke(d) {
+    this.lastWatts = d.power;
+    const s = this.strokes, last = s[s.length - 1];
+    if (last && (last.n === d.strokeCount || (last.watts == null && Date.now() - last.t < 2500))) { last.watts = d.power; if (this.session) this.save(); }
+    queueMulti();
+  }
+  onCurvePacket(dv) {
+    const v = u8(dv), F = this.fc;
+    const total = v[0] >> 4, n = v[0] & 0x0f, seq = v[1];
+    if (F.got > 0 && seq !== ((F.lastSeq + 1) & 0xff)) { F.buf = []; F.got = 0; }
+    if (F.got === 0) F.total = total;
+    for (let k = 0; k < n && 2 + k*2 + 1 < v.length; k++) F.buf.push(le16(v, 2 + k*2));
+    F.got++; F.lastSeq = seq;
+    if (F.got >= F.total) { const c = F.buf; F.buf = []; F.got = 0; this.onCurve(c); }
+  }
+  onCurve(raw) {
+    if (!raw || raw.length < 4) return;
+    const s = this.strokes, last = s[s.length - 1];
+    if (last && !last.curve && Date.now() - last.t < 2500) { attachCurve(last, raw, 'pm5'); if (this.session) this.save(); }
+    else this.pending = { raw, t: Date.now() };
+    queueMulti(true);
+  }
+
+  /* --- recording --- */
+  startRecording(group) {
+    if (this.session || !this.live) return;
+    const now = Date.now();
+    this.session = { id: `s${now}_${this.i}`, start: now, end: now, name: '', notes: '', rower: this.rower || '',
+      group, erg: this.name, ergSerial: this.serial, dragFactor: this.general.dragFactor || null,
+      forceSource: this.state === 'demo' ? 'demo' : 'ble', strokes: [] };
+    this.rec = { time: 0, dist: 0, lastT: this.general.elapsedTime ?? null, lastD: this.general.distance ?? null };
+    this.pending = null;
+  }
+  save() {
+    clearTimeout(this.saveTimer);
+    this.saveTimer = setTimeout(() => { if (this.session && DB.db) DB.put(this.session).catch(e => log('Save failed: ' + e)); }, 1500);
+  }
+  async finish() {
+    clearTimeout(this.saveTimer);
+    const s = this.session; this.session = null; this.preview = [];
+    if (!s) return 0;
+    if (s.strokes.length < 3) { try { await DB.del(s.id); } catch (e) {} return 0; }
+    await DB.put(s); return 1;
+  }
+
+  /* --- demo erg (simulated rower) --- */
+  startDemo() {
+    this.state = 'demo'; this.name = `Demo PM5 ${this.i + 1}`; this.serial = '';
+    const base = 150 + Math.random() * 60, pos = 0.32 + Math.random() * 0.15, rate = 18 + Math.round(Math.random() * 6);
+    let n = 0, t = 0, d = 0;
+    const tick = () => {
+      n++;
+      const npts = 22 + Math.round(Math.random() * 4), pk = base * (0.93 + Math.random() * 0.14), pp = pos + (Math.random() - 0.5) * 0.06;
+      const raw = [];
+      for (let k = 0; k < npts; k++) { const x = k / (npts - 1);
+        const a = x < pp ? Math.sin(Math.PI/2 * x/pp) : Math.cos(Math.PI/2 * (x-pp)/(1-pp));
+        raw.push(Math.max(0, Math.round(pk * Math.pow(Math.max(0, a), 1.15) + (Math.random() - 0.5) * 4))); }
+      raw[raw.length - 1] = 0;
+      const sTime = 60 / rate, sDist = 8 + base / 25; t += sTime; d += sDist;
+      const pace = 500 / (sDist / sTime), watts = Math.round(2.8 / Math.pow(pace / 500, 3));
+      this.add = { strokeRate: rate, currentPace: pace, heartRate: 0 };
+      this.onGeneral({ elapsedTime: t, distance: d, dragFactor: 120 });
+      this.onStroke({ elapsedTime: t, distance: d, driveLength: 1.38, driveTime: sTime * 0.33, recoveryTime: sTime * 0.67,
+        strokeDistance: sDist, peakForceLb: Math.max(...raw), avgForceLb: mean(raw), work: 600, strokeCount: n });
+      this.onAddStroke({ power: watts, strokeCount: n });
+      this.onCurve(raw);
+    };
+    if (multiRecording) this.startRecording(multiGroup);
+    this.demoTimer = setInterval(tick, (window.__fastDemo ? 30 : 2600 + Math.random() * 600));
+    renderMulti();
+  }
+}
+const ergs = Array.from({ length: MAX_ERGS }, (_, i) => new ErgSlot(i));
+const liveErgs = () => ergs.filter(s => s.live);
+const anyMultiConnected = () => ergs.some(s => s.state !== 'empty');
+
+/* --- mode & view switching --- */
+function setMode(m) {
+  if (m === appMode) return;
+  if (m === 'multi' && (isConnected() || demo.on || session)) { toast('Disconnect the single erg first'); return; }
+  if (m === 'single' && anyMultiConnected()) { toast('Disconnect all ergs first'); return; }
+  appMode = m; try { localStorage.setItem('ergcurve-mode', m); } catch (e) {}
+  applyMode();
+}
+function applyMode() {
+  $('singleWrap').classList.toggle('hidden', appMode !== 'single');
+  $('multiWrap').classList.toggle('hidden', appMode !== 'multi');
+  $('btnView').classList.toggle('hidden', appMode !== 'multi');
+  [...$('modeSeg').children].forEach(b => b.classList.toggle('active', b.dataset.m === appMode));
+  setStatus(); renderMulti(); drawLive();
+}
+const VIEWS = [['list', '☰ List'], ['gallery', '▦ Gallery'], ['single', '▢ Single']];
+function setView(v) {
+  multiView = v; try { localStorage.setItem('ergcurve-mview', v); } catch (e) {}
+  renderMulti();
+}
+
+/* --- rendering --- */
+const fmtW = w => w == null ? '–' : Math.round(w);
+function ergNumbers(s) {
+  const st = s.strokes, last = st[st.length - 1];
+  const t = s.session ? s.rec.time : s.general.elapsedTime;
+  const dist = s.session ? s.rec.dist : s.general.distance;
+  return {
+    split: fmtSplit(s.add.currentPace), rate: s.add.strokeRate || '–',
+    watts: fmtW((last && last.watts) ?? s.lastWatts),
+    peak: last && last.peakLb ? Math.round(fConv(last.peakLb)) : '–',
+    time: fmtTime(t), dist: dist != null ? Math.round(dist) : '–',
+    strokes: s.session ? s.session.strokes.length : '–',
+  };
+}
+function stateText(s) {
+  return { connecting: 'Connecting…', lost: 'Reconnecting…', demo: 'Demo', connected: s.session ? '● Recording' : 'Connected' }[s.state] || '';
+}
+function curveSeries(s, big) {
+  const withCurve = s.strokes.filter(x => x.curve);
+  if (!withCurve.length) return [];
+  const rs = withCurve.map(x => resample(x.curve).map(fConv));
+  const series = [];
+  if (big) withCurve.slice(-6, -1).forEach(x => series.push({ y: resample(x.curve).map(fConv), color: '#8a9bb0', alpha: .35, width: 1.5 }));
+  if (rs.length > 1) series.push({ y: rs[0].map((_, k) => mean(rs.map(r => r[k]))), color: '#ff9f43', width: big ? 2 : 1.5, dash: [5, 4] });
+  series.push({ y: rs[rs.length - 1], color: '#3ba3ff', width: big ? 3 : 2.2 });
+  return series;
+}
+function renderMulti() {
+  if (appMode !== 'multi') return;
+  const vb = $('btnView'); vb.textContent = (VIEWS.find(v => v[0] === multiView) || VIEWS[0])[1];
+  const n = liveErgs().length;
+  $('mRecord').classList.toggle('hidden', multiRecording || !n);
+  $('mFinish').classList.toggle('hidden', !multiRecording);
+  $('mNote').textContent = multiRecording ? `Recording ${ergs.filter(s => s.session).length} erg(s). Each rower gets their own session.`
+    : n ? 'Not recording – warm up freely. Start recording saves every connected erg from now on.'
+        : 'Tap Connect on a slot, then pick that erg. Match the PM5 number in the list to the number shown on the monitor.';
+  ['mList', 'mGallery', 'mSingle'].forEach(id => $(id).classList.toggle('hidden', id !== 'm' + multiView[0].toUpperCase() + multiView.slice(1)));
+  if (multiView === 'list') renderList();
+  else if (multiView === 'gallery') renderGallery();
+  else renderSingleErg();
+  setStatus();
+}
+function renderList() {
+  const el = $('mList'); el.innerHTML = '';
+  ergs.forEach(s => {
+    const card = document.createElement('div'); card.className = 'card'; card.style.padding = '10px 12px'; card.style.margin = '8px 0';
+    if (s.state === 'empty') {
+      card.innerHTML = `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+        <div><div class="t" style="font-weight:600"></div><div class="note">Not connected</div></div>
+        <button class="btn small primary">Connect PM5</button></div>`;
+      card.querySelector('.t').textContent = s.rower ? `Erg ${s.i + 1} · ${s.rower}` : `Erg ${s.i + 1}`;
+      card.querySelector('button').onclick = () => s.connect();
+    } else {
+      card.innerHTML = `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+          <button class="btn small nameBtn" style="font-weight:650;font-size:15px"></button>
+          <span class="note st"></span>
+          <button class="btn small danger x">✕</button></div>
+        <div class="tiles" style="grid-template-columns:repeat(5,1fr);margin:8px 0 0">
+          <div class="tile"><div class="v" data-k="split">–</div><div class="l">/500m</div></div>
+          <div class="tile"><div class="v" data-k="rate">–</div><div class="l">spm</div></div>
+          <div class="tile"><div class="v" data-k="watts">–</div><div class="l">watts</div></div>
+          <div class="tile"><div class="v" data-k="peak">–</div><div class="l">peak ${uLabel()}</div></div>
+          <div class="tile"><div class="v" data-k="time">–</div><div class="l">time</div></div></div>
+        <div class="note sub" style="margin-top:4px"></div>`;
+      card.querySelector('.nameBtn').textContent = s.label() + ' ✎';
+      card.querySelector('.nameBtn').onclick = async () => s.setRower(await pickRower(`Who's on ${s.name || 'erg ' + (s.i + 1)}?`, ''));
+      card.querySelector('.x').onclick = async () => { if (await confirmBox(`Disconnect ${s.label()}?` + (s.session ? ' Their session so far will be saved.' : ''))) s.disconnect(); };
+      card.querySelectorAll('.tiles .v').forEach(v => v.style.fontSize = '17px');
+    }
+    card.dataset.slot = s.i;
+    el.appendChild(card);
+  });
+  updateMultiNumbers();
+}
+function renderGallery() {
+  const el = $('mGallery'); el.innerHTML = '';
+  const L = liveErgs().concat(ergs.filter(s => s.state === 'lost' || s.state === 'connecting'));
+  if (!L.length) { el.innerHTML = '<p class="note" style="grid-column:1/-1">No ergs connected yet. Connect them from the List view.</p>'; return; }
+  L.forEach(s => {
+    const card = document.createElement('div'); card.className = 'card'; card.style.margin = '0'; card.style.padding = '8px';
+    card.innerHTML = `<div style="font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" class="nm"></div>
+      <div class="note sub"></div><canvas height="110" style="margin-top:4px"></canvas>`;
+    card.querySelector('.nm').textContent = s.label();
+    card.dataset.slot = s.i;
+    card.onclick = () => { singleIndex = liveErgs().indexOf(s); if (singleIndex < 0) singleIndex = 0; setView('single'); };
+    el.appendChild(card);
+  });
+  updateMultiNumbers(); drawMultiCurves();
+}
+function renderSingleErg() {
+  const el = $('mSingle'); const L = liveErgs();
+  if (!L.length) { el.innerHTML = '<p class="note">No ergs connected yet. Connect them from the List view.</p>'; return; }
+  singleIndex = ((singleIndex % L.length) + L.length) % L.length;
+  const s = L[singleIndex];
+  el.innerHTML = `<div style="display:flex;align-items:center;justify-content:space-between;margin:6px 0">
+      <button class="btn small prev">‹</button>
+      <div style="text-align:center"><div style="font-size:20px;font-weight:700" class="nm"></div><div class="note st"></div></div>
+      <button class="btn small next">›</button></div>
+    <div style="text-align:center;margin-bottom:6px" class="dots"></div>
+    <div class="tiles" style="margin-top:4px">
+      <div class="tile"><div class="v" data-k="split">–</div><div class="l">/500m</div></div>
+      <div class="tile"><div class="v" data-k="rate">–</div><div class="l">spm</div></div>
+      <div class="tile"><div class="v" data-k="watts">–</div><div class="l">watts</div></div>
+      <div class="tile"><div class="v" data-k="peak">–</div><div class="l">peak ${uLabel()}</div></div>
+      <div class="tile"><div class="v" data-k="time">–</div><div class="l">time</div></div>
+      <div class="tile"><div class="v" data-k="dist">–</div><div class="l">metres</div></div>
+      <div class="tile"><div class="v" data-k="strokes">–</div><div class="l">strokes</div></div>
+      <div class="tile"><div class="v" data-k="drive">–</div><div class="l">drive m</div></div></div>
+    <div class="card" style="margin-top:6px"><canvas height="240"></canvas>
+      <div class="legend"><span><i style="background:var(--accent)"></i>this stroke</span><span><i style="background:#8a9bb0"></i>last 5</span><span><i style="background:var(--accent2)"></i>session average</span></div></div>
+    <p class="note" style="text-align:center">Swipe left or right to change rower</p>`;
+  el.querySelector('.nm').textContent = s.label();
+  el.querySelector('.dots').innerHTML = L.map((_, k) => `<span style="display:inline-block;width:7px;height:7px;border-radius:50%;margin:0 3px;background:${k === singleIndex ? 'var(--accent)' : 'var(--line)'}"></span>`).join('');
+  el.querySelector('.prev').onclick = () => { singleIndex--; renderSingleErg(); };
+  el.querySelector('.next').onclick = () => { singleIndex++; renderSingleErg(); };
+  el.dataset.slot = s.i;
+  updateMultiNumbers(); drawMultiCurves();
+}
+let multiQueued = false, multiCurveDirty = false;
+function queueMulti(curves) {
+  if (curves) multiCurveDirty = true;
+  if (multiQueued || appMode !== 'multi') return; multiQueued = true;
+  requestAnimationFrame(() => { multiQueued = false; updateMultiNumbers(); if (multiCurveDirty) { multiCurveDirty = false; drawMultiCurves(); } setStatus(); });
+}
+function updateMultiNumbers() {
+  if (appMode !== 'multi' || $('viewLive').classList.contains('hidden')) return;
+  document.querySelectorAll('#multiWrap [data-slot]').forEach(card => {
+    const s = ergs[+card.dataset.slot]; if (!s || s.state === 'empty') return;
+    const N = ergNumbers(s);
+    const st = s.strokes, last = st[st.length - 1];
+    N.drive = last && last.driveLen ? last.driveLen.toFixed(2) : '–';
+    card.querySelectorAll('[data-k]').forEach(v => { const val = N[v.dataset.k]; if (val != null && v.textContent !== String(val)) v.textContent = val; });
+    const stEl = card.querySelector('.st'); if (stEl) stEl.textContent = stateText(s);
+    const sub = card.querySelector('.sub');
+    if (sub) sub.textContent = multiView === 'gallery'
+      ? `${N.split} · ${N.watts} W · ${N.rate} spm`
+      : `${s.name || ''}${s.serial ? ' · #' + s.serial : ''}${s.session ? ' · ' + N.strokes + ' strokes · ' + N.dist + ' m' : ''}${s.noCurve ? ' · no force curves' : ''}`;
+  });
+}
+function drawMultiCurves() {
+  if (appMode !== 'multi' || $('viewLive').classList.contains('hidden')) return;
+  document.querySelectorAll('#multiWrap [data-slot]').forEach(card => {
+    const c = card.querySelector('canvas'); if (!c) return;
+    const s = ergs[+card.dataset.slot], big = multiView === 'single';
+    const series = curveSeries(s, big);
+    chart(c, { series, xMax: 100, xFmt: pctX, yLabel: big ? uLabel() : '', yMax: big ? undefined : undefined,
+      empty: series.length ? null : (s.noCurve ? 'No force curves' : 'Waiting for a stroke…') });
+  });
+}
+// swipe between rowers in single view
+(() => {
+  let x0 = null, y0 = null;
+  document.addEventListener('touchstart', e => { if (appMode === 'multi' && multiView === 'single' && e.target.closest('#mSingle')) { x0 = e.touches[0].clientX; y0 = e.touches[0].clientY; } }, { passive: true });
+  document.addEventListener('touchend', e => {
+    if (x0 == null) return;
+    const dx = e.changedTouches[0].clientX - x0, dy = e.changedTouches[0].clientY - y0; x0 = null;
+    if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5) { singleIndex += dx < 0 ? 1 : -1; renderSingleErg(); }
+  }, { passive: true });
+})();
+
+/* --- recording all ergs --- */
+function multiStart() {
+  if (!liveErgs().length) return;
+  multiGroup = 'g' + Date.now(); multiRecording = true;
+  liveErgs().forEach(s => s.startRecording(multiGroup));
+  log(`Multi: recording started on ${liveErgs().length} erg(s)`);
+  toast('Recording all connected ergs');
+  renderMulti();
+}
+async function multiFinish() {
+  if (!await confirmBox('Finish and save every erg\'s session?')) return;
+  let saved = 0;
+  for (const s of ergs) saved += await s.finish();
+  multiRecording = false;
+  toast(`Saved ${saved} session${saved === 1 ? '' : 's'}`);
+  renderMulti(); renderSessionList();
+}
+function multiStatus() {
+  const n = liveErgs().length;
+  $('dot').className = 'dot' + (multiRecording ? ' rec' : n ? ' on' : '');
+  $('statusText').textContent = multiRecording ? `Recording · ${ergs.filter(s => s.session).length} ergs` : n ? `${n} erg${n === 1 ? '' : 's'} connected` : 'Multi · none connected';
+}
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') ergs.forEach(s => s.session && DB.db && DB.put(s.session).catch(() => {})); });
+
+$('modeSeg').querySelectorAll('button').forEach(b => b.onclick = () => setMode(b.dataset.m));
+$('btnView').onclick = () => { const k = VIEWS.findIndex(v => v[0] === multiView); setView(VIEWS[(k + 1) % VIEWS.length][0]); };
+$('mRecord').onclick = () => multiStart();
+$('mFinish').onclick = () => multiFinish();
+$('mDemo').onclick = () => { const s = ergs.find(x => x.state === 'empty'); if (!s) { toast('All 8 slots are in use'); return; }
+  s.rower = s.rower || ['Sam','Tom','Jack','Liam','Noah','Ben','Will','Max'][s.i]; s.startDemo(); };
+$('meName').value = myName();
+$('meName').onchange = e => { try { localStorage.setItem('ergcurve-me', e.target.value.trim()); } catch (x) {} };
+$('tabMore').addEventListener('click', renderRosterEditor);
 
 (async function init() {
   $('appVersion').textContent = `ErgCurve v${APP_VERSION} · ${APP_DATE}`;
@@ -1369,6 +1858,7 @@ window.addEventListener('beforeunload', () => { saveSession(); });
     const all = await DB.all();
     for (const s of all) if (s.strokes.length < 3) await DB.del(s.id);
   } catch (e) {}
+  applyMode(); renderRosterEditor();
   setStatus(); updateTiles(); drawLive();
   if (location.hash === '#demo-fast') { startDemo(true); startRecording(); }   // used for automated testing
 })();
