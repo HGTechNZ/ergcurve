@@ -261,6 +261,7 @@
   </div>
 </section>
 </main>
+<footer id="appVersion" style="text-align:center;font-size:12px;color:var(--muted);padding:18px 12px 28px"></footer>
 
 <div id="toast"></div>
 <div id="modal" class="hidden"><div class="box"><div id="modalText"></div>
@@ -270,6 +271,9 @@
 
 <script>
 "use strict";
+/* Bump on every release so the version at the bottom of the page shows what's loaded */
+const APP_VERSION = '4.2';
+const APP_DATE = '16 Nov 2026';
 /* =====================================================================
    PM5 Bluetooth definitions (Concept2 PM5 Bluetooth Smart Interface)
    ===================================================================== */
@@ -1289,6 +1293,7 @@ window.addEventListener('resize', () => { drawLive(); if (!$('viewDetail').class
 window.addEventListener('beforeunload', () => { saveSession(); });
 
 (async function init() {
+  $('appVersion').textContent = `ErgCurve v${APP_VERSION} · ${APP_DATE}`;
   if (!navigator.bluetooth) showNoBt();
   try { await DB.open(); } catch (e) {
     $('storageNote').textContent = 'Storage unavailable in this browser mode (private browsing?) – sessions will not be saved.';
