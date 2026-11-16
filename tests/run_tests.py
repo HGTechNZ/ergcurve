@@ -207,6 +207,60 @@ async def main():
         check('Workout picker locked while recording (v5.4)', await pg.evaluate("[...document.querySelectorAll('.wSelect')].every(s => s.disabled)"))
         await pg.close()
 
+        print('\n[Coaching analysis, squad report & progress]')
+        pg = await fresh(b, errs)
+        # synthetic sessions: good curves, late-peak curves, dipped curves
+        await pg.evaluate('''(async () => {
+          const mk = (peakPos, dip, jitter) => { const raw = []; const n = 26;
+            for (let i = 0; i < n; i++) { const x = i / (n - 1);
+              let a = x < peakPos ? Math.sin(Math.PI / 2 * x / peakPos) : Math.cos(Math.PI / 2 * (x - peakPos) / (1 - peakPos));
+              if (dip && x > 0.45 && x < 0.6) a *= 0.8;
+              raw.push(Math.max(0, Math.round(170 * Math.pow(Math.max(0, a), 1.0) + (Math.random() - .5) * jitter))); }
+            raw[n - 1] = 0; return raw; };
+          const sess = (id, rower, start, peakPos, dip, drag) => ({ id, rower, start, end: start + 1, name: '', notes: '', dragFactor: drag,
+            strokes: Array.from({ length: 40 }, (_, i) => { const c = mk(peakPos, dip, 6); const st = { t: start + i * 3000, n: i + 1, time: i * 3, dist: i * 10,
+              rate: 20, pace: 120, watts: 200 + (rower === 'Sam' ? 40 : 0), driveTime: 0.9, recTime: 2.0, driveLen: 1.4, strokeDist: 10, peakLb: 170, avgLb: 100 };
+              attachCurve(st, c, 'pm5'); return st; }) });
+          const now = Date.now();
+          await DB.put(sess('a1', 'Tom', now - 3 * 864e5, 0.62, false, 120));
+          await DB.put(sess('a2', 'Tom', now - 864e5, 0.40, false, 120));
+          await DB.put(sess('b1', 'Sam', now - 2 * 864e5, 0.40, true, 135));
+        })()''')
+        tips = await pg.evaluate("(async () => analyseStrokes((await DB.get('a1')).strokes).tips.map(t => t.key))()")
+        check('Late-peak curves → top tip "Get on the legs earlier" (v5.5)', tips[:1] == ['late'], str(tips))
+        tips = await pg.evaluate("(async () => analyseStrokes((await DB.get('b1')).strokes).tips.map(t => t.key))()")
+        check('Mid-drive dip → "Connect legs and body" tip (v5.5)', 'dip' in tips, str(tips))
+        good = await pg.evaluate("(async () => { const a = analyseStrokes((await DB.get('a2')).strokes); return [a.tips.length, Math.round(a.metrics.adherence), Math.round(a.metrics.consistency)]; })()")
+        check('Ideal-shaped curves get few tips and a high ideal match (v5.5)', good[0] <= 1 and good[1] >= 85, str(good))
+        check('Tips ranked 1–5 at most (v5.5)', await pg.evaluate("(async () => analyseStrokes((await DB.get('b1')).strokes).tips.length <= 5)()"))
+        await pg.click('#tabSessions'); await pg.wait_for_timeout(300)
+        await pg.click('#sessList .sess:has-text("Tom") >> nth=1'); await pg.wait_for_timeout(400)
+        check('Coaching focus card shows ranked tips on an old session (v5.5)', await pg.evaluate("document.querySelectorAll('#dCoach .sess').length") >= 1)
+        summ = await pg.inner_text('#dSummary')
+        check('Summary shows ideal match and consistency (v5.5)', 'Ideal match' in summ and 'Consistency' in summ)
+        await pg.click('#dCoach .sess button >> nth=0'); await pg.wait_for_timeout(200)
+        check('Assign stores the focus point for that rower (v5.5)', await pg.evaluate("focusFor('Tom').length") == 1)
+        st = await pg.evaluate("(async () => focusStatus(focusFor('Tom')[0], await DB.get('a2')))()")
+        check('Later session shows the assigned fault improved (v5.5)', st and st['cls'] == 'green', str(st))
+        await pg.click('#segMetric button:has-text("Ideal match")'); await pg.wait_for_timeout(100)
+        check('Per-stroke ideal match chart available (v5.5)', await pg.evaluate("detail.metric === 'adh'"))
+        await pg.click('#btnBack'); await pg.click('#btnSquad'); await pg.wait_for_timeout(400)
+        await pg.select_option('#sqPeriod', '0'); await pg.wait_for_timeout(300)
+        rows = await pg.evaluate("[...document.querySelectorAll('#sqTable .sess .t')].map(e => e.textContent)")
+        check('Squad report lists each rower, sorted by watts (v5.5)', rows == ['1. Sam', '2. Tom'], str(rows))
+        check('Squad report shows focus status (v5.5)', 'Working on' in await pg.inner_text('#sqTable'))
+        check('Drag factor check flags different drag (v5.5)', 'Drag factors differ' in await pg.inner_text('#sqDrag'))
+        await pg.click('#sqTable .sess:has-text("Tom")'); await pg.wait_for_timeout(400)
+        check('Rower progress page opens for that rower (v5.5)', await pg.input_value('#pgRower') == 'Tom' and await pg.evaluate("$('pgTable').rows.length") == 3)
+        await pg.close()
+
+        pg = await fresh(b, errs)
+        await pg.click('#modeSeg button[data-m=multi]'); await pg.evaluate('window.__fastDemo = true')
+        await pg.click('#mDemo'); await pg.click('#mDemo'); await pg.wait_for_timeout(500)
+        await pg.evaluate("ergs[1].general.dragFactor = 140; renderMulti()")
+        check('Multi mode warns when ergs have different drag (v5.5)', 'Drag factors differ' in await pg.inner_text('#mDrag'))
+        await pg.close()
+
         print('\n[Errors]')
         bad = [e for e in errs if 'Bluetooth' not in e]
         check('No script errors or security-policy violations during tests', not bad, '; '.join(bad[:3]))

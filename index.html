@@ -169,6 +169,7 @@
     <label class="f">Workout (applies to every erg)</label>
     <select class="wSelect"></select>
     <p class="note" id="mNote"></p>
+    <p class="note" id="mDrag" style="color:#ff9f43"></p>
     <div id="mList"></div>
     <div id="mGallery" class="hidden" style="display:grid;grid-template-columns:1fr 1fr;gap:8px"></div>
     <div id="mSingle" class="hidden"></div>
@@ -204,9 +205,39 @@
 
 <!-- ===================== SESSIONS ===================== -->
 <section id="viewSessions" class="hidden">
-  <h2 style="font-size:16px;margin:4px 2px 8px">Saved sessions</h2>
+  <div style="display:flex;justify-content:space-between;align-items:center;margin:4px 2px 8px;gap:8px">
+    <h2 style="font-size:16px;margin:0">Saved sessions</h2>
+    <button id="btnSquad" class="btn small primary">Squad report &amp; progress</button></div>
   <select id="rowerFilter" style="margin-top:4px"></select>
   <div id="sessList" class="card"></div>
+</section>
+
+<!-- ===================== SQUAD & PROGRESS ===================== -->
+<section id="viewSquad" class="hidden">
+  <div class="row"><button id="sqBack" class="btn small">‹ Saved sessions</button></div>
+  <div class="seg" id="sqSeg" style="margin-top:10px"><button data-t="squad">Squad report</button><button data-t="progress">Rower progress</button></div>
+  <div id="sqSquad"><div class="card">
+    <div class="row">
+      <div class="grow"><label class="f">Period</label><select id="sqPeriod"><option value="1">Today</option><option value="7" selected>Last 7 days</option><option value="30">Last 30 days</option><option value="0">All time</option></select></div>
+      <div class="grow"><label class="f">Sort by</label><select id="sqSort"><option value="watts">Watts</option><option value="adh">Ideal match</option><option value="cons">Consistency</option></select></div>
+    </div>
+    <p class="note" id="sqDrag" style="color:#ff9f43"></p>
+    <div id="sqTable"></div>
+    <p class="note">Watts, ideal match and consistency are averaged over the period's sessions. Tap a rower for their progress.</p>
+  </div></div>
+  <div id="sqProgress" class="hidden">
+    <div class="card"><label class="f">Rower</label><select id="pgRower"></select></div>
+    <p class="note hidden" id="pgEmpty">No sessions with rower names yet.</p>
+    <div id="pgBody">
+      <div class="card"><h3>Assigned focus</h3><div id="pgFocus"></div></div>
+      <div class="card"><h3>Ideal match &amp; consistency</h3><canvas id="pgScores" height="180"></canvas>
+        <div class="legend"><span><i style="background:#c084fc"></i>ideal match</span><span><i style="background:#3ba3ff"></i>consistency</span></div></div>
+      <div class="card"><h3>Average peak force</h3><canvas id="pgForce" height="160"></canvas></div>
+      <div class="card"><h3>Curve: first vs latest session</h3><canvas id="pgCurve" height="200"></canvas>
+        <div class="legend"><span><i style="background:#8a9bb0"></i>first</span><span><i style="background:var(--accent)"></i>latest</span><span><i style="background:#c084fc"></i>ideal</span></div></div>
+      <div class="card"><h3>Sessions</h3><table id="pgTable"></table><p class="note">Tap a session to open it.</p></div>
+    </div>
+  </div>
 </section>
 
 <!-- ===================== SESSION DETAIL ===================== -->
@@ -244,6 +275,9 @@
     <table id="dWorkoutTable"></table>
     <p class="note" id="dWorkoutOverall"></p>
     <p class="note">The Rate chart under "Stroke by stroke" shows the target as a grey line.</p></div>
+  <div class="card" id="dCoachCard"><h3>Coaching focus</h3>
+    <div id="dCoach"></div>
+    <p class="note">Ranked 1–5 from the curve shape against your ideal curve. Tap Assign on the one to work on; later sessions show whether it improved. These are automatic suggestions, so use your coaching eye too.</p></div>
 
   <div class="card">
     <h3>Average curve ± 1 SD</h3>
@@ -258,6 +292,7 @@
       <span>Show ideal curve <i style="display:inline-block;width:18px;height:0;border-top:3px dashed #c084fc;vertical-align:middle"></i></span></label>
     <label class="f">Compare with another session</label>
     <select id="dCompare"></select>
+    <p class="note" id="dCmpDrag" style="color:#ff9f43"></p>
     <p class="note">X axis is % of the drive, so strokes of different length line up.</p>
   </div>
 
@@ -387,7 +422,7 @@
 <script>
 "use strict";
 /* Bump on every release so the version at the bottom of the page shows what's loaded */
-const APP_VERSION = '5.4';
+const APP_VERSION = '5.5';
 const APP_DATE = '16 Nov 2026';
 /* =====================================================================
    PM5 Bluetooth definitions (Concept2 PM5 Bluetooth Smart Interface)
@@ -1229,6 +1264,7 @@ const METRICS = [
   ['split','Split', s => s.pace && s.pace < 600 ? s.pace : null, () => 's/500m'],
   ['rec','Recovery time', s => s.recTime || null, () => 's'],
   ['rr','Rec ÷ drive', s => s.recTime && s.driveTime ? s.recTime / s.driveTime : null, () => 'ratio'],
+  ['adh','Ideal match', s => adherenceOf(s), () => '%'],
 ];
 
 async function openDetail(id) {
@@ -1301,6 +1337,8 @@ function renderDetail() {
     ['Recovery ÷ drive ratio', mean(v(x => x.recTime && x.driveTime ? x.recTime / x.driveTime : null)).toFixed(2) + ' (SD ' + sd(v(x => x.recTime && x.driveTime ? x.recTime / x.driveTime : null)).toFixed(2) + ')'],
     ['Avg heart rate', Math.round(mean(v(x => x.hr))) || '–'],
     ['Strokes with a curve', `${st.filter(x => x.curve).length}`],
+    ...(() => { const a = analyseStrokes(st); return a.n >= 8 ? [['Ideal match (adherence)', Math.round(a.metrics.adherence) + '%'], ['Consistency', Math.round(a.metrics.consistency) + '%']] : []; })(),
+    ['Drag factor', s.dragFactor || '–'],
   ];
   $('dSummary').innerHTML = rows.map(([a, b]) => `<tr><td>${a}</td><td>${b}</td></tr>`).join('').replace(/NaN[^<]*/g, '–');
 
@@ -1314,6 +1352,7 @@ function renderDetail() {
   }
   const cmp = sessionsCache.find(x => x.id === detail.cmp);
   $('cmpLegend').classList.toggle('hidden', !cmp);
+  $('dCmpDrag').textContent = cmp ? dragWarning([[s.rower || 'this session', s.dragFactor], [cmp.rower || 'compare session', cmp.dragFactor]]) : '';
   if (cmp) { const cc = avgCurve(filteredStrokes(cmp, 'all')); if (cc) series.push({ y: cc.mean, color: '#ff9f43', width: 2.5, dash: [6,4] }); }
   chart($('cAvg'), { series, xMax: 100, xFmt: pctX, yLabel: uLabel(), empty: ac ? null : 'No force curves in these strokes' });
 
@@ -1327,6 +1366,7 @@ function renderDetail() {
   chart($('cQuart'), { series: qSeries, xMax: 100, xFmt: pctX, yLabel: uLabel(), empty: qSeries.length ? null : 'Not enough curves' });
 
   renderWorkoutCard(s, st);
+  renderCoachCard(s, st);
 
   // per stroke metric
   const M = METRICS.find(m => m[0] === detail.metric);
@@ -1415,12 +1455,13 @@ async function deliver(name, text, mime) {
    Navigation & wiring
    ===================================================================== */
 function show(view) {
-  ['viewLive','viewWorkouts','viewSessions','viewDetail','viewMore'].forEach(v => $(v).classList.toggle('hidden', v !== view));
+  ['viewLive','viewWorkouts','viewSessions','viewSquad','viewDetail','viewMore'].forEach(v => $(v).classList.toggle('hidden', v !== view));
   $('tabLive').classList.toggle('active', view === 'viewLive');
   $('tabWorkouts').classList.toggle('active', view === 'viewWorkouts');
   if (view === 'viewWorkouts') renderWorkoutList();
   if (view === 'viewMore') renderDisplaySettings();
-  $('tabSessions').classList.toggle('active', view === 'viewSessions' || view === 'viewDetail');
+  $('tabSessions').classList.toggle('active', view === 'viewSessions' || view === 'viewDetail' || view === 'viewSquad');
+  if (view === 'viewSquad') renderSquad();
   $('tabMore').classList.toggle('active', view === 'viewMore');
   if (view === 'viewLive') { drawLive(); renderMulti(); }
   if (view === 'viewSessions') renderSessionList();
@@ -1799,6 +1840,7 @@ function curveSeries(s, big) {
 }
 function renderMulti() {
   if (appMode !== 'multi') return;
+  $('mDrag').textContent = dragWarning(liveErgs().map(s => [s.label(), s.general.dragFactor]));
   const vb = $('btnView'); vb.textContent = (VIEWS.find(v => v[0] === multiView) || VIEWS[0])[1];
   const n = liveErgs().length;
   $('mRecord').classList.toggle('hidden', multiRecording || !n);
@@ -2268,6 +2310,267 @@ $('wSave').onclick = () => saveWorkoutFromEditor();
 $('wType').onchange = () => syncTypeBoxes();
 $('wAddStep').onclick = () => { const last = wEdit.steps[wEdit.steps.length - 1]; wEdit.steps.push({ ...last, rate: Math.min(60, last.rate + 2) }); renderStepRows(); };
 document.querySelectorAll('.wSelect').forEach(sel => sel.onchange = e => setActiveWorkout(e.target.value));
+
+/* =====================================================================
+   STROKE ANALYSIS: adherence (match to the ideal curve), consistency,
+   and coaching tips (ranked focus points). All computed from saved
+   curves, so it works on every session already recorded.
+   ===================================================================== */
+const clamp100 = v => Math.max(0, Math.min(100, v));
+let _idealCache = { key: '', shape: null };
+function idealShapeCached() {
+  const k = JSON.stringify([ideal.pos, ideal.catchLvl, ideal.finishLvl]);
+  if (_idealCache.key !== k) _idealCache = { key: k, shape: idealShape() };
+  return _idealCache.shape;
+}
+function normCurve(raw) {
+  if (!raw || raw.length < 5) return null;
+  const r = resample(raw), m = Math.max(...r);
+  return m > 0 ? r.map(v => v / m) : null;
+}
+/* % match between one stroke's shape and the ideal shape (both scaled to peak = 1) */
+function adherenceOf(st) {
+  const c = normCurve(st.curve); if (!c) return null;
+  const id = idealShapeCached();
+  const mae = mean(c.map((v, i) => Math.abs(v - id[i])));
+  return clamp100(100 * (1 - mae / 0.35));
+}
+/* how alike the strokes are to each other in shape (100 = identical) */
+function consistencyOf(strokes) {
+  const cs = strokes.map(x => normCurve(x.curve)).filter(Boolean);
+  if (cs.length < 5) return null;
+  const meanSD = mean(cs[0].map((_, i) => sd(cs.map(c => c[i]))));
+  return clamp100(100 * (1 - meanSD / 0.2));
+}
+function hasDip(c) {
+  // a fall of 8%+ of peak followed by a rise of 6%+ in the middle of the drive = legs/body not connected
+  let hi = 0, lo = Infinity, fell = false;
+  for (let i = Math.round(c.length * 0.12); i < Math.round(c.length * 0.85); i++) {
+    const v = c[i];
+    if (!fell) { if (v > hi) hi = v; else if (hi - v >= 0.08) { fell = true; lo = v; } }
+    else { if (v < lo) lo = v; if (v - lo >= 0.06) return true; }
+  }
+  return false;
+}
+const FAULTS = {
+  late:    { title: 'Get on the legs earlier', more: m => `Peak force comes at ${Math.round(m.peakPos)}% of the drive (ideal ${ideal.pos}%). Push the legs straight away at the catch and hang off the handle earlier.` },
+  early:   { title: 'Keep the pressure on after the catch', more: m => `Peak comes very early (${Math.round(m.peakPos)}% of the drive) and then fades. Keep driving the legs into the body swing instead of a spike and ease-off.` },
+  catch:   { title: 'Sharper catch', more: () => 'Force builds slowly at the start of the drive. Connect legs to handle straight away: no slack in the arms, no shooting the slide.' },
+  dip:     { title: 'Connect legs and body', more: m => `${Math.round(m.dipFrac * 100)}% of strokes show a dip mid-drive, a break in the legs-to-body handover. Keep the back fixed until the legs are mostly down, then swing smoothly.` },
+  finish:  { title: 'Hold on through the finish', more: () => 'Force drops away early in the second half of the drive. Keep the body swing going and draw through with the arms to the finish.' },
+  peaky:   { title: 'Fuller stroke', more: m => `The curve is peaky (fullness ${Math.round(m.fullness * 100)}% vs ideal ${Math.round(m.idealFull * 100)}%). Spread the effort across the whole drive rather than one big hit.` },
+  inconsistent: { title: 'Repeat the same stroke', more: m => `Consistency is ${Math.round(m.consistency)}%: stroke shapes vary a lot. Try a lower rate and focus on doing exactly the same stroke every time.` },
+  rushing: { title: 'Slow the slide', more: m => `Recovery is only ${m.ratio.toFixed(1)}× the drive time. At steady rates aim for about 2×: hands away, body over, then the slide.` },
+};
+/* returns { metrics, sev: {fault: 0..1}, tips: [ranked top 5] } */
+function analyseStrokes(strokes) {
+  const ok = strokes.filter(x => x.curve && x.curve.length >= 5);
+  const cs = ok.map(x => normCurve(x.curve)).filter(Boolean);
+  const out = { metrics: {}, sev: {}, tips: [], n: cs.length };
+  if (cs.length < 8) return out;
+  const id = idealShapeCached(), n = id.length;
+  const avg = id.map((_, i) => mean(cs.map(c => c[i])));
+  const seg = (a, b) => { const lo = Math.round(a * (n - 1)), hi = Math.round(b * (n - 1)); let t = 0, k = 0; for (let i = lo; i <= hi; i++) { t += id[i] - avg[i]; k++; } return t / k; };
+  const rr = strokes.filter(x => x.recTime && x.driveTime).map(x => x.recTime / x.driveTime);
+  const m = out.metrics = {
+    peakPos: mean(cs.map(c => 100 * c.indexOf(Math.max(...c)) / (n - 1))),
+    catchDef: seg(0.05, 0.16), finishDef: seg(0.74, 0.92),
+    dipFrac: cs.filter(hasDip).length / cs.length,
+    fullness: mean(avg), idealFull: mean(id),
+    consistency: consistencyOf(ok) ?? 100,
+    ratio: rr.length ? mean(rr) : 2, rate: mean(strokes.filter(x => x.rate).map(x => x.rate)) || 0,
+    adherence: mean(ok.map(adherenceOf).filter(v => v != null)),
+  };
+  const lim = v => Math.max(0, Math.min(1, v));
+  out.sev = {
+    late: lim((m.peakPos - ideal.pos - 8) / 20),
+    early: lim((ideal.pos - m.peakPos - 10) / 20),
+    catch: lim((m.catchDef - 0.08) / 0.25),
+    dip: lim((m.dipFrac - 0.2) / 0.5),
+    finish: lim((m.finishDef - 0.08) / 0.25),
+    peaky: lim((m.idealFull - m.fullness - 0.06) / 0.15),
+    inconsistent: lim((75 - m.consistency) / 40),
+    rushing: m.rate && m.rate <= 26 ? lim((1.6 - m.ratio) / 0.6) : 0,
+  };
+  out.tips = Object.entries(out.sev).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]).slice(0, 5)
+    .map(([key, v]) => ({ key, sev: v, title: FAULTS[key].title, more: FAULTS[key].more(m) }));
+  return out;
+}
+const _statCache = new Map();
+function sessionStats(s) {
+  const k = `${s.id}:${s.strokes.length}:${_idealCache.key || JSON.stringify([ideal.pos, ideal.catchLvl, ideal.finishLvl])}`;
+  if (_statCache.has(k)) return _statCache.get(k);
+  idealShapeCached();
+  const st = s.strokes, a = analyseStrokes(st);
+  const w = st.map(x => x.watts).filter(x => x > 0), p = st.map(x => x.pace).filter(x => x > 0 && x < 600);
+  const pk = st.map(x => x.peakLb).filter(x => x > 0);
+  const r = { watts: w.length ? mean(w) : null, pace: p.length ? mean(p) : null, peakN: pk.length ? mean(pk) * LB_TO_N : null,
+    adherence: a.n >= 8 ? a.metrics.adherence : null, consistency: a.n >= 8 ? a.metrics.consistency : null, analysis: a };
+  _statCache.set(k, r); return r;
+}
+
+/* --- assigned focus points, per rower --- */
+const rKey = r => (r || '').trim().toLowerCase();
+function getFocus() { try { return JSON.parse(localStorage.getItem('ergcurve-focus') || '{}'); } catch (e) { return {}; } }
+function setFocus(f) { try { localStorage.setItem('ergcurve-focus', JSON.stringify(f)); } catch (e) {} }
+function focusFor(rower) { return getFocus()[rKey(rower)] || []; }
+function toggleFocus(s, tip) {
+  const f = getFocus(), k = rKey(s.rower); if (!k) { toast('Add a rower name to this session first'); return; }
+  const list = f[k] || [];
+  const i = list.findIndex(x => x.key === tip.key);
+  if (i >= 0) list.splice(i, 1);
+  else list.push({ key: tip.key, title: tip.title, assignedAt: s.start, sessionId: s.id, sev: tip.sev });
+  f[k] = list; setFocus(f);
+}
+/* how an assigned focus has gone in a later session */
+function focusStatus(fx, s) {
+  if (s.start <= fx.assignedAt) return s.id === fx.sessionId ? { txt: 'Assigned from this session', cls: 'none' } : null;
+  const a = sessionStats(s).analysis; if (a.n < 8) return { txt: 'Not enough curves to judge', cls: 'none' };
+  const now = a.sev[fx.key] ?? 0;
+  if (now === 0) return { txt: 'No longer flagged ✓', cls: 'green' };
+  if (now < fx.sev - 0.1) return { txt: 'Improved', cls: 'green' };
+  if (now > fx.sev + 0.1) return { txt: 'Worse', cls: 'red' };
+  return { txt: 'About the same', cls: 'orange' };
+}
+
+/* --- session detail: coaching card --- */
+function renderCoachCard(s, st) {
+  const el = $('dCoach'); el.innerHTML = '';
+  const a = analyseStrokes(st);
+  if (a.n < 8) { el.innerHTML = '<p class="note">Needs at least 8 strokes with force curves.</p>'; return; }
+  const mine = focusFor(s.rower);
+  if (!a.tips.length) { const p = document.createElement('p'); p.textContent = 'No clear faults – the curve is close to the ideal shape. 👍'; el.appendChild(p); }
+  a.tips.forEach((t, i) => {
+    const row = document.createElement('div'); row.className = 'sess'; row.style.cssText = 'align-items:flex-start;cursor:default;gap:10px';
+    row.innerHTML = '<div style="font-size:20px;font-weight:750;color:var(--accent);width:22px"></div><div style="flex:1"><div class="t"></div><div class="m"></div><div class="m sevbar" style="margin-top:4px"></div></div><button class="btn small"></button>';
+    row.children[0].textContent = i + 1;
+    row.querySelector('.t').textContent = t.title;
+    row.querySelectorAll('.m')[0].textContent = t.more;
+    row.querySelector('.sevbar').innerHTML = `<span class="pill ${t.sev > 0.6 ? 'red' : t.sev > 0.3 ? 'orange' : 'green'}">${t.sev > 0.6 ? 'Big' : t.sev > 0.3 ? 'Medium' : 'Small'}</span>`;
+    const on = mine.some(x => x.key === t.key);
+    const b = row.querySelector('button'); b.textContent = on ? '✓ Assigned' : 'Assign'; if (on) b.classList.add('primary');
+    b.onclick = () => { toggleFocus(s, t); renderCoachCard(s, st); };
+    el.appendChild(row);
+  });
+  if (mine.length) {
+    const h = document.createElement('div'); h.className = 'f'; h.style.marginTop = '10px';
+    h.textContent = `${s.rower}'s assigned focus`; el.appendChild(h);
+    mine.forEach(fx => {
+      const stt = focusStatus(fx, s), d = document.createElement('div'); d.style.cssText = 'padding:4px 0';
+      d.innerHTML = '<span class="pill"></span><span></span>';
+      d.firstChild.className = 'pill ' + (stt ? stt.cls : 'none'); d.firstChild.textContent = stt ? stt.txt : 'Assigned after this session';
+      d.lastChild.textContent = `${fx.title} (assigned ${new Date(fx.assignedAt).toLocaleDateString()})`;
+      el.appendChild(d);
+    });
+  } else if (!s.rower) { const p = document.createElement('p'); p.className = 'note'; p.textContent = 'Add a rower name above to assign focus points and track them over time.'; el.appendChild(p); }
+}
+
+/* --- drag factor check --- */
+function dragWarning(list) {   // list of [name, drag]
+  const v = list.filter(x => x[1]);
+  if (v.length < 2) return '';
+  const lo = Math.min(...v.map(x => x[1])), hi = Math.max(...v.map(x => x[1]));
+  return hi - lo > 10 ? `⚠ Drag factors differ (${v.map(x => `${x[0]} ${x[1]}`).join(', ')}). Set them within about 10 of each other for a fair comparison.` : '';
+}
+
+/* =====================================================================
+   SQUAD REPORT & ROWER PROGRESS
+   ===================================================================== */
+let squadTab = 'squad';
+async function renderSquad() {
+  const all = (await DB.all()).sort((a, b) => a.start - b.start);
+  $('sqSquad').classList.toggle('hidden', squadTab !== 'squad');
+  $('sqProgress').classList.toggle('hidden', squadTab !== 'progress');
+  [...$('sqSeg').children].forEach(b => b.classList.toggle('active', b.dataset.t === squadTab));
+  if (squadTab === 'squad') renderSquadReport(all); else renderProgress(all);
+}
+function renderSquadReport(all) {
+  const days = +$('sqPeriod').value, since = days ? Date.now() - days * 864e5 : 0;
+  const by = new Map();
+  all.filter(s => s.start >= since && (s.rower || '').trim()).forEach(s => { const k = rKey(s.rower); if (!by.has(k)) by.set(k, []); by.get(k).push(s); });
+  const rows = [...by.values()].map(list => {
+    const st = list.map(sessionStats), last = list[list.length - 1];
+    const avg = f => { const v = st.map(f).filter(x => x != null); return v.length ? mean(v) : null; };
+    const focus = focusFor(last.rower).map(fx => ({ fx, stt: focusStatus(fx, last) }));
+    return { name: last.rower.trim(), n: list.length, watts: avg(x => x.watts), pace: avg(x => x.pace), adh: avg(x => x.adherence), cons: avg(x => x.consistency),
+      top: sessionStats(last).analysis.tips[0], drag: last.dragFactor, focus };
+  });
+  const key = $('sqSort').value;
+  rows.sort((a, b) => (b[key] ?? -1) - (a[key] ?? -1));
+  const el = $('sqTable'); el.innerHTML = '';
+  if (!rows.length) { el.innerHTML = '<p class="note">No named rowers in this period. Sessions need a rower name to appear here.</p>'; $('sqDrag').textContent = ''; return; }
+  rows.forEach((r, i) => {
+    const card = document.createElement('div'); card.className = 'sess'; card.style.cssText = 'display:block;cursor:pointer';
+    card.innerHTML = `<div style="display:flex;justify-content:space-between;gap:8px"><div class="t"></div><div class="m sm"></div></div>
+      <div class="tiles" style="grid-template-columns:repeat(4,1fr);margin:6px 0">
+        <div class="tile"><div class="v" style="font-size:16px"></div><div class="l">watts</div></div>
+        <div class="tile"><div class="v" style="font-size:16px"></div><div class="l">/500m</div></div>
+        <div class="tile"><div class="v" style="font-size:16px"></div><div class="l">ideal match</div></div>
+        <div class="tile"><div class="v" style="font-size:16px"></div><div class="l">consistency</div></div></div>
+      <div class="m tp"></div><div class="fc"></div>`;
+    card.querySelector('.t').textContent = `${i + 1}. ${r.name}`;
+    card.querySelector('.sm').textContent = `${r.n} session${r.n === 1 ? '' : 's'}${r.drag ? ' · drag ' + r.drag : ''}`;
+    const v = card.querySelectorAll('.tiles .v');
+    v[0].textContent = r.watts != null ? Math.round(r.watts) : '–'; v[1].textContent = fmtSplit(r.pace);
+    v[2].textContent = r.adh != null ? Math.round(r.adh) + '%' : '–'; v[3].textContent = r.cons != null ? Math.round(r.cons) + '%' : '–';
+    card.querySelector('.tp').textContent = r.top ? `Top focus from latest session: ${r.top.title}` : 'Latest session: no clear faults';
+    const fc = card.querySelector('.fc');
+    r.focus.forEach(({ fx, stt }) => { const d = document.createElement('div'); d.style.marginTop = '4px';
+      d.innerHTML = '<span class="pill"></span><span class="note"></span>';
+      d.firstChild.className = 'pill ' + (stt ? stt.cls : 'none'); d.firstChild.textContent = stt ? stt.txt : 'Assigned';
+      d.lastChild.textContent = 'Working on: ' + fx.title; fc.appendChild(d); });
+    card.onclick = () => { squadTab = 'progress'; $('pgRower').dataset.want = r.name; renderSquad(); };
+    el.appendChild(card);
+  });
+  $('sqDrag').textContent = dragWarning(rows.map(r => [r.name, r.drag]));
+}
+function renderProgress(all) {
+  const sel = $('pgRower');
+  const names = [...new Map(all.filter(s => (s.rower || '').trim()).map(s => [rKey(s.rower), s.rower.trim()])).values()].sort((a, b) => a.localeCompare(b));
+  const want = sel.dataset.want || sel.value; delete sel.dataset.want;
+  sel.innerHTML = ''; names.forEach(n => { const o = document.createElement('option'); o.value = n; o.textContent = n; sel.appendChild(o); });
+  if (!names.length) { $('pgBody').classList.add('hidden'); $('pgEmpty').classList.remove('hidden'); return; }
+  $('pgBody').classList.remove('hidden'); $('pgEmpty').classList.add('hidden');
+  sel.value = names.find(n => rKey(n) === rKey(want)) || names[0];
+  const list = all.filter(s => rKey(s.rower) === rKey(sel.value));
+  const st = list.map(sessionStats);
+  const labels = list.map(s => new Date(s.start).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }));
+  const xf = i => Math.abs(i - Math.round(i)) < 1e-6 ? (labels[Math.round(i)] || '') : '';   // label real sessions only
+  chart($('pgScores'), { series: [
+      { y: st.map(x => x.adherence), color: '#c084fc', width: 2.5 }, { y: st.map(x => x.adherence), color: '#c084fc', dots: true, r: 3 },
+      { y: st.map(x => x.consistency), color: '#3ba3ff', width: 2.5 }, { y: st.map(x => x.consistency), color: '#3ba3ff', dots: true, r: 3 }],
+    xMax: Math.max(1, list.length - 1), xFmt: xf, yMin: 0, yMax: 100, yLabel: '%', empty: list.length ? null : 'No sessions' });
+  const pk = st.map(x => x.peakN != null ? (units === 'N' ? x.peakN : x.peakN / LB_TO_N) : null), w = st.map(x => x.watts);
+  const vals = pk.filter(x => x != null);
+  chart($('pgForce'), { series: [{ y: pk, color: '#ff9f43', width: 2.5 }, { y: pk, color: '#ff9f43', dots: true, r: 3 }],
+    xMax: Math.max(1, list.length - 1), xFmt: xf, yLabel: uLabel(),
+    yMin: vals.length ? Math.floor(Math.min(...vals) * 0.9) : 0, yMax: vals.length ? Math.ceil(Math.max(...vals) * 1.1) : 10 });
+  // first vs latest average curve
+  const ac = s => avgCurve(s.strokes);
+  const first = ac(list[0]), latest = ac(list[list.length - 1]);
+  const series = [];
+  if (first && list.length > 1) series.push({ y: first.mean, color: '#8a9bb0', width: 2.2, dash: [5, 4] });
+  if (latest) { series.push({ y: latest.mean, color: '#3ba3ff', width: 3 }); const id = idealFor([latest.mean]); if (id) series.unshift(id); }
+  chart($('pgCurve'), { series, xMax: 100, xFmt: pctX, yLabel: uLabel(), empty: latest ? null : 'No curves' });
+  const tb = $('pgTable'); tb.innerHTML = '<tr><td class="note">Date</td><td class="note">Watts</td><td class="note">Match</td><td class="note">Consist.</td></tr>';
+  list.slice().reverse().forEach((s, i) => { const x = st[list.length - 1 - i], tr = document.createElement('tr');
+    [new Date(s.start).toLocaleDateString(), x.watts != null ? Math.round(x.watts) : '–', x.adherence != null ? Math.round(x.adherence) + '%' : '–', x.consistency != null ? Math.round(x.consistency) + '%' : '–']
+      .forEach(v => { const td = document.createElement('td'); td.textContent = v; tr.appendChild(td); });
+    tr.style.cursor = 'pointer'; tr.onclick = () => openDetail(s.id); tb.appendChild(tr); });
+  const fl = $('pgFocus'); fl.innerHTML = '';
+  const last = list[list.length - 1], mine = focusFor(sel.value);
+  if (!mine.length) fl.innerHTML = '<p class="note">No focus points assigned yet. Open a session and tap Assign on a coaching tip.</p>';
+  mine.forEach(fx => { const stt = focusStatus(fx, last), d = document.createElement('div'); d.style.padding = '4px 0';
+    d.innerHTML = '<span class="pill"></span><span></span>';
+    d.firstChild.className = 'pill ' + (stt ? stt.cls : 'none'); d.firstChild.textContent = stt ? stt.txt : 'Assigned';
+    d.lastChild.textContent = `${fx.title} (since ${new Date(fx.assignedAt).toLocaleDateString()})`; fl.appendChild(d); });
+}
+
+$('btnSquad').onclick = () => show('viewSquad');
+$('sqBack').onclick = () => show('viewSessions');
+[...$('sqSeg').children].forEach(b => b.onclick = () => { squadTab = b.dataset.t; renderSquad(); });
+$('sqPeriod').onchange = () => renderSquad(); $('sqSort').onchange = () => renderSquad();
+$('pgRower').onchange = () => renderSquad();
 
 (async function init() {
   $('appVersion').textContent = `ErgCurve Test v${APP_VERSION} · ${APP_DATE}`;
