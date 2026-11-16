@@ -272,7 +272,7 @@
 <script>
 "use strict";
 /* Bump on every release so the version at the bottom of the page shows what's loaded */
-const APP_VERSION = '4.2';
+const APP_VERSION = '4.3';
 const APP_DATE = '16 Nov 2026';
 /* =====================================================================
    PM5 Bluetooth definitions (Concept2 PM5 Bluetooth Smart Interface)
@@ -403,6 +403,7 @@ function startRecording() {
               forceSource: live.forceSource || null, strokes: [] };
   live.strokes = session.strokes;
   live.pendingCurve = null;
+  resetRecCounters();
   updateRecButtons(); setStatus(); updateTiles(); drawLive();
   log('Recording started');
   toast('Recording – strokes from now are saved');
@@ -716,7 +717,7 @@ async function setupGatt() {
     await sub(rowing, CH.general, dv => {
       const g = Parse.general(dv), prev = live.general.strokeState;
       live.general = g;
-      syncClock(g.elapsedTime);
+      syncClock(g.elapsedTime); syncDist(g.distance);
       if (live.forceSource === 'csafe' && !LiveDraw.running && prev !== 4 && g.strokeState === 4) Csafe.start();
       updateTiles();
     }, true);
@@ -838,6 +839,7 @@ function demoStroke() {
   const g = new Array(19).fill(0);
   put24(g,0,Math.round(demo.t*100)); put24(g,3,Math.round(demo.d*10)); g[18]=118;
   live.general = Parse.general(demoPacket(g));
+  syncDist(live.general.distance);
   // 0x0035 stroke data
   const s = new Array(20).fill(0);
   put24(s,0,Math.round(demo.t*100)); put24(s,3,Math.round(demo.d*10)); s[6]=Math.round(142 - 6*fatigue);
@@ -959,7 +961,7 @@ function updateTiles() {
   $('tWatts').textContent = (last && last.watts) || live.addStroke.power || '–';
   $('tPeak').textContent = last && last.peakLb ? Math.round(fConv(last.peakLb)) : '–';
   $('tPeak').nextElementSibling.textContent = 'peak ' + uLabel();
-  $('tDist').textContent = live.general.distance != null ? Math.round(live.general.distance) : '–';
+  $('tDist').textContent = session ? Math.round(rec.dist) : live.general.distance != null ? Math.round(live.general.distance) : '–';
   $('tStrokes').textContent = session ? session.strokes.length : '–';
   $('tDrive').textContent = last && last.driveLen ? last.driveLen.toFixed(2) : '–';
   if (session) setStatus();
@@ -968,9 +970,23 @@ function updateTiles() {
    re-anchors to the PM5's elapsed time every time one arrives. It only runs
    while the PM5's time is actually advancing, and stops if messages stop. */
 const clock = { pm: null, at: 0, running: false, shown: null };
+/* While recording, time and metres count from when Start recording was tapped
+   (warm-up excluded). Built from PM5 deltas, so a PM5 reset mid-session
+   (starting a new piece) keeps adding on instead of jumping back. */
+const rec = { time: 0, dist: 0, lastT: null, lastD: null };
+function resetRecCounters() {
+  rec.time = 0; rec.dist = 0; rec.startAt = performance.now(); rec.lastT = clock.pm; rec.lastD = live.general.distance ?? null;
+}
+function syncDist(D) {
+  if (D == null || isNaN(D)) return;
+  if (session && rec.lastD != null) { const dd = D - rec.lastD; if (dd > 0 && dd < 100) rec.dist += dd; }
+  rec.lastD = D;
+}
 function syncClock(t) {
   if (t == null || isNaN(t)) return;
   const now = performance.now();
+  if (session && rec.lastT != null && t !== rec.lastT) { const d = t - rec.lastT; if (d > 0 && d < 5) rec.time += d; }
+  if (t !== rec.lastT) rec.lastT = t;
   if (clock.pm != null) {
     if (t > clock.pm + 0.001) clock.running = true;
     else if (t < clock.pm - 0.5) clock.running = false;          // PM5 reset for a new piece
@@ -980,9 +996,9 @@ function syncClock(t) {
   clock.pm = t; clock.at = now;
 }
 setInterval(() => {
-  let t = clock.pm;
+  let t = session ? rec.time : clock.pm;
   if (t != null && clock.running) {
-    const dt = (performance.now() - clock.at) / 1000;
+    const dt = (performance.now() - (session ? Math.max(clock.at, rec.startAt || 0) : clock.at)) / 1000;
     t += dt < 3.5 ? dt : 0;
     if (dt >= 3.5) clock.running = false;                          // lost contact: freeze
   }
@@ -1172,7 +1188,8 @@ function renderDetail() {
 function drawSingle(st) {
   const i = +$('strokeSlider').value, x = st[i];
   if (!x) { $('strokeInfo').textContent = ''; chart($('cStroke'), { series: [], empty: 'No strokes' }); return; }
-  $('strokeInfo').textContent = `Stroke ${x.n} · ${fmtTime(x.time)} · ${x.rate ?? '?'} spm · ${fmtSplit(x.pace)} · ` +
+  const idx = detail.s.strokes.indexOf(x);
+  $('strokeInfo').textContent = `Stroke ${idx + 1} of ${detail.s.strokes.length} · ${fmtTime(covered(detail.s.strokes.slice(0, idx + 1)).t)} in · ${x.rate ?? '?'} spm · ${fmtSplit(x.pace)} · ` +
     `peak ${x.peakLb ? Math.round(fConv(x.peakLb)) : '?'} ${uLabel()} at ${x.peakPos != null ? x.peakPos.toFixed(0) + '%' : '?'} · drive ${x.driveLen?.toFixed(2) ?? '?'} m`;
   const ac = avgCurve(st);
   const series = [];
