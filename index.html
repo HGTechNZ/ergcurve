@@ -147,6 +147,7 @@
 
 <!-- ===================== SESSIONS ===================== -->
 <section id="viewSessions" class="hidden">
+  <select id="rowerFilter" style="margin-top:4px"></select>
   <div id="sessList" class="card"></div>
 </section>
 
@@ -154,7 +155,9 @@
 <section id="viewDetail" class="hidden">
   <div class="row"><button id="btnBack" class="btn small">‹ Sessions</button></div>
   <div class="card">
-    <label class="f">Name</label>
+    <label class="f">Rower</label>
+    <input type="text" id="dRower" placeholder="Who rowed this" autocapitalize="words">
+    <label class="f">Session name</label>
     <input type="text" id="dName" placeholder="e.g. 3x10' UT1 r20">
     <label class="f">Notes</label>
     <textarea id="dNotes" placeholder="How it felt, technique focus, damper..."></textarea>
@@ -264,6 +267,16 @@
 <footer id="appVersion" style="text-align:center;font-size:12px;color:var(--muted);padding:18px 12px 28px"></footer>
 
 <div id="toast"></div>
+<div id="rowerModal" class="hidden" style="position:fixed;inset:0;background:#0009;display:flex;align-items:center;justify-content:center;z-index:30;padding:20px">
+  <div class="box" style="background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px;max-width:380px;width:100%">
+    <b>Who's rowing?</b>
+    <p class="note" style="margin:4px 0 8px">Recording has already started. The name labels this session.</p>
+    <input type="text" id="rowerInput" placeholder="Rower name" autocomplete="off" autocapitalize="words">
+    <div class="seg" id="rowerChips" style="margin-top:8px"></div>
+    <div class="row" style="margin-top:12px;justify-content:flex-end">
+      <button id="rowerSkip" class="btn small">Skip</button>
+      <button id="rowerOk" class="btn small primary">Save name</button></div>
+  </div></div>
 <div id="modal" class="hidden"><div class="box"><div id="modalText"></div>
   <div class="row" style="margin-top:14px;justify-content:flex-end">
     <button id="modalNo" class="btn small">Cancel</button>
@@ -272,7 +285,7 @@
 <script>
 "use strict";
 /* Bump on every release so the version at the bottom of the page shows what's loaded */
-const APP_VERSION = '4.3';
+const APP_VERSION = '4.4';
 const APP_DATE = '16 Nov 2026';
 /* =====================================================================
    PM5 Bluetooth definitions (Concept2 PM5 Bluetooth Smart Interface)
@@ -395,10 +408,10 @@ try { autoRecord = localStorage.getItem('ergcurve-autorec') === '1'; } catch (e)
 const preview = [];           // strokes seen while NOT recording (warm-up): shown live, never saved
 live.strokes = preview;
 
-function startRecording() {
+function startRecording(rower) {
   if (session) return;
   const now = Date.now();
-  session = { id: 's' + now, start: now, end: now, name: '', notes: '',
+  session = { id: 's' + now, start: now, end: now, name: '', notes: '', rower: rower || '',
               dragFactor: live.general.dragFactor || null, monitor: live.monitorInfo || null,
               forceSource: live.forceSource || null, strokes: [] };
   live.strokes = session.strokes;
@@ -785,7 +798,7 @@ function setStatus(text) {
   const dot = $('dot');
   const conn = isConnected() || demo.on;
   dot.className = 'dot' + (session ? ' rec' : conn ? ' on' : '');
-  $('statusText').textContent = text || (session ? `Recording · ${session.strokes.length} strokes`
+  $('statusText').textContent = text || (session ? `Recording${session.rower ? ' · ' + session.rower : ''} · ${session.strokes.length} strokes`
     : demo.on ? 'Demo mode' : conn ? 'Connected' : 'Not connected');
   $('btnConnect').textContent = conn ? 'Disconnect' : 'Connect PM5';
   $('btnConnect').className = 'btn grow ' + (conn ? '' : 'primary');
@@ -1046,16 +1059,22 @@ let sessionsCache = [];
 async function renderSessionList() {
   if (!DB.db) return;
   sessionsCache = (await DB.all()).sort((a, b) => b.start - a.start);
+  const rf = $('rowerFilter'), cur = rf.value;
+  const names = [...new Set(sessionsCache.map(s => (s.rower || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  rf.innerHTML = '<option value="">All rowers</option>' + names.map(n => `<option></option>`).join('');
+  names.forEach((n, i) => { rf.options[i + 1].value = n; rf.options[i + 1].textContent = n; });
+  rf.value = names.includes(cur) ? cur : '';
+  rf.classList.toggle('hidden', !names.length);
   const el = $('sessList');
   if (!sessionsCache.length) { el.innerHTML = '<p class="note">No sessions yet. Connect to the PM5 and row, or try Demo on the Live tab.</p>'; return; }
   el.innerHTML = '';
-  for (const s of sessionsCache) {
+  for (const s of sessionsCache.filter(x => !rf.value || (x.rower || '').trim() === rf.value)) {
     const st = s.strokes, cov = covered(st);
     const d = new Date(s.start);
     const div = document.createElement('div'); div.className = 'sess';
     const curves = st.filter(x => x.curve).length;
     div.innerHTML = `<div><div class="t"></div><div class="m"></div></div><div class="chev">›</div>`;
-    div.querySelector('.t').textContent = s.name || d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' }) + ' · ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    div.querySelector('.t').textContent = (s.rower ? s.rower + ' · ' : '') + (s.name || d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' }) + ' · ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
     div.querySelector('.m').textContent = `${st.length} strokes · ${Math.round(cov.d)} m · ${fmtTime(cov.t)} · ${curves} curves` + (s.name ? ' · ' + d.toLocaleDateString() : '');
     div.onclick = () => openDetail(s.id);
     el.appendChild(div);
@@ -1078,7 +1097,7 @@ const METRICS = [
 async function openDetail(id) {
   const s = await DB.get(id); if (!s) return;
   detail.s = s; detail.part = 'all'; detail.cmp = '';
-  $('dName').value = s.name || ''; $('dNotes').value = s.notes || '';
+  $('dName').value = s.name || ''; $('dRower').value = s.rower || ''; $('dNotes').value = s.notes || '';
   ['fMin','fMax','fFrom','fTo','fLen'].forEach(k => $(k).value = '');
   const d = new Date(s.start);
   $('dWhen').textContent = `${d.toLocaleString()} · drag factor ${s.dragFactor || '?'} · force source: ${s.forceSource || '?'}` +
@@ -1086,7 +1105,7 @@ async function openDetail(id) {
   const sel = $('dCompare'); sel.innerHTML = '<option value="">— none —</option>';
   sessionsCache.filter(x => x.id !== id).forEach(x => {
     const o = document.createElement('option'); o.value = x.id;
-    o.textContent = (x.name || new Date(x.start).toLocaleString()) + ` (${x.strokes.length})`; sel.appendChild(o);
+    o.textContent = (x.rower ? x.rower + ' · ' : '') + (x.name || new Date(x.start).toLocaleString()) + ` (${x.strokes.length})`; sel.appendChild(o);
   });
   sel.value = '';
   show('viewDetail');
@@ -1259,15 +1278,38 @@ $('tabLive').onclick = () => show('viewLive');
 $('tabSessions').onclick = () => show('viewSessions');
 $('tabMore').onclick = () => show('viewMore');
 $('btnBack').onclick = () => show('viewSessions');
+$('rowerFilter').onchange = () => renderSessionList();
 $('btnConnect').onclick = () => (isConnected() ? disconnect() : connect());
 $('btnDemo').onclick = () => (demo.on ? stopDemo() : startDemo());
-$('btnRecord').onclick = () => startRecording();
+$('btnRecord').onclick = () => { startRecording(); askRower(); };
+async function knownRowers() {
+  try { const all = await DB.all(); const seen = new Map();
+    all.sort((a, b) => b.start - a.start).forEach(s => { const r = (s.rower || '').trim(); if (r && !seen.has(r.toLowerCase())) seen.set(r.toLowerCase(), r); });
+    return [...seen.values()];
+  } catch (e) { return []; }
+}
+async function askRower() {
+  const names = await knownRowers();
+  $('rowerInput').value = '';
+  const chips = $('rowerChips'); chips.innerHTML = '';
+  names.slice(0, 16).forEach(n => { const b = document.createElement('button'); b.textContent = n;
+    b.onclick = () => done(n); chips.appendChild(b); });
+  $('rowerModal').classList.remove('hidden');
+  function done(name) {
+    $('rowerModal').classList.add('hidden');
+    name = (name || '').trim();
+    if (session && name) { session.rower = name; saveSession(); setStatus(); toast('Recording ' + name); }
+  }
+  $('rowerOk').onclick = () => done($('rowerInput').value);
+  $('rowerSkip').onclick = () => done('');
+  $('rowerInput').onkeydown = e => { if (e.key === 'Enter') done($('rowerInput').value); };
+}
 $('btnFinish').onclick = async () => { if (await confirmBox('Finish and save this session?')) { stopDemo(); finishSession(false); } };
 ['fMin','fMax','fFrom','fTo','fLen'].forEach(k => $(k).oninput = () => renderDetail());
 $('dCompare').onchange = e => { detail.cmp = e.target.value; renderDetail(); };
 $('strokeSlider').oninput = () => drawSingle(filteredStrokes(detail.s, detail.part));
-const saveMeta = async () => { if (!detail.s) return; detail.s.name = $('dName').value.trim(); detail.s.notes = $('dNotes').value; await DB.put(detail.s); };
-$('dName').onchange = saveMeta; $('dNotes').onchange = saveMeta;
+const saveMeta = async () => { if (!detail.s) return; detail.s.rower = $('dRower').value.trim(); detail.s.name = $('dName').value.trim(); detail.s.notes = $('dNotes').value; await DB.put(detail.s); };
+$('dName').onchange = saveMeta; $('dRower').onchange = saveMeta; $('dNotes').onchange = saveMeta;
 $('btnCsv').onclick = () => deliver(fileName(detail.s, 'csv'), toCsv(detail.s), 'text/csv');
 $('btnJson').onclick = () => deliver(fileName(detail.s, 'json'), JSON.stringify(detail.s), 'application/json');
 $('btnDelete').onclick = async () => {
