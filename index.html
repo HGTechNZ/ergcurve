@@ -29,8 +29,8 @@
   .dot.rec { background:var(--accent2); animation:blink 1s infinite; }
   @keyframes blink { 50% { opacity:.3; } }
   nav { display:flex; background:var(--panel); border-bottom:1px solid var(--line); }
-  nav button { flex:1; background:none; border:0; color:var(--muted); padding:11px;
-    font-size:14px; border-bottom:2px solid transparent; }
+  nav button { flex:1; background:none; border:0; color:var(--muted); padding:10px 4px;
+    font-size:13.5px; line-height:1.15; border-bottom:2px solid transparent; }
   nav button.active { color:var(--text); border-bottom-color:var(--accent); }
   main { padding:12px; max-width:900px; margin:0 auto; }
   .row { display:flex; gap:8px; flex-wrap:wrap; }
@@ -73,6 +73,13 @@
   .legend i { display:inline-block; width:14px; height:3px; vertical-align:middle; margin-right:4px; }
   .hidden { display:none !important; }
   .leader { border-color:#2ecc71 !important; box-shadow:0 0 0 2px #2ecc71, 0 0 16px #2ecc7166; transition:box-shadow .3s; }
+  .tile.tl-green { border-color:#2ecc71; background:#123222; } .v.tl-green { color:#2ecc71; }
+  .tile.tl-orange { border-color:#ff9f43; background:#33240f; } .v.tl-orange { color:#ff9f43; }
+  .tile.tl-red { border-color:#ff5c5c; background:#3a1616; } .v.tl-red { color:#ff5c5c; }
+  .pill { display:inline-block; padding:1px 8px; border-radius:10px; font-weight:700; font-size:12.5px; margin-right:6px; color:#0f1720; }
+  .pill.green { background:#2ecc71; } .pill.orange { background:#ff9f43; } .pill.red { background:#ff5c5c; } .pill.none { background:var(--line); color:var(--text); }
+  #wStrip { display:flex; align-items:center; gap:12px; }
+  #wStrip .big { font-size:24px; font-weight:750; white-space:nowrap; } #wStrip .small { font-size:13px; color:var(--muted); }
   .leadBadge { color:#2ecc71; font-weight:700; font-size:12px; }
   #log { font:11px/1.35 ui-monospace,Menlo,monospace; color:var(--muted); white-space:pre-wrap;
     max-height:180px; overflow:auto; }
@@ -100,7 +107,8 @@
 </header>
 <nav>
   <button id="tabLive" class="active">Live</button>
-  <button id="tabSessions">Sessions</button>
+  <button id="tabWorkouts">Workouts</button>
+  <button id="tabSessions">Saved sessions</button>
   <button id="tabMore">Settings</button>
 </nav>
 
@@ -115,22 +123,16 @@
     <button id="btnConnect" class="btn primary grow">Connect PM5</button>
     <button id="btnDemo" class="btn">Demo</button>
   </div>
+  <label class="f">Workout</label>
+  <select class="wSelect"></select>
   <div class="row" style="margin-top:8px">
     <button id="btnRecord" class="btn warn grow hidden">● Start recording</button>
     <button id="btnFinish" class="btn warn grow hidden">Finish &amp; save session</button>
   </div>
   <p class="note" id="recNote">Connect to the PM5 to begin.</p>
 
-  <div class="tiles">
-    <div class="tile"><div class="v" id="tSplit">–</div><div class="l">/500m</div></div>
-    <div class="tile"><div class="v" id="tRate">–</div><div class="l">spm</div></div>
-    <div class="tile"><div class="v" id="tWatts">–</div><div class="l">watts</div></div>
-    <div class="tile"><div class="v" id="tPeak">–</div><div class="l">peak N</div></div>
-    <div class="tile"><div class="v" id="tTime">–</div><div class="l">time</div></div>
-    <div class="tile"><div class="v" id="tDist">–</div><div class="l">metres</div></div>
-    <div class="tile"><div class="v" id="tStrokes">–</div><div class="l">strokes</div></div>
-    <div class="tile"><div class="v" id="tDrive">–</div><div class="l">drive m</div></div>
-  </div>
+  <div class="tiles" id="tilesSingle"></div>
+  <div class="card hidden" id="wStrip" style="margin-top:0"><div class="big"></div><div class="small"></div></div>
 
   <div class="card">
     <h3>Force curve</h3>
@@ -164,6 +166,8 @@
       <button id="mFinish" class="btn warn grow hidden">Finish &amp; save all</button>
       <button id="mDemo" class="btn">+ Demo erg</button>
     </div>
+    <label class="f">Workout (applies to every erg)</label>
+    <select class="wSelect"></select>
     <p class="note" id="mNote"></p>
     <div id="mList"></div>
     <div id="mGallery" class="hidden" style="display:grid;grid-template-columns:1fr 1fr;gap:8px"></div>
@@ -178,15 +182,36 @@
   </div>
 </section>
 
+<!-- ===================== WORKOUTS ===================== -->
+<section id="viewWorkouts" class="hidden">
+  <div class="card">
+    <h3>Workouts</h3>
+    <p class="note">Plans for a session. Pick one on the Live tab before Start recording. The target rate shows while rowing, and every stroke saves its target so you can compare it afterwards.</p>
+    <div id="wList"></div>
+    <div class="row" style="margin-top:8px"><button id="wNew" class="btn primary grow">+ New workout</button></div>
+  </div>
+  <div class="card hidden" id="wEditor">
+    <h3 id="wEdTitle">New workout</h3>
+    <label class="f">Name</label><input type="text" id="wName" placeholder="e.g. 3 x 4' stepped 20/22/24">
+    <label class="f">Type</label>
+    <select id="wType"><option value="steady">Steady – one target rate</option><option value="stepped">Stepped – rate changes each step</option></select>
+    <div id="wSteadyBox"><label class="f">Target rate (spm)</label><input type="number" id="wRate" inputmode="numeric" min="10" max="60"></div>
+    <div id="wStepsBox"><label class="f">Steps (time as m:ss, or metres)</label><div id="wSteps"></div>
+      <button id="wAddStep" class="btn small">+ Add step</button></div>
+    <div class="row" style="margin-top:12px"><button id="wCancel" class="btn grow">Cancel</button><button id="wSave" class="btn primary grow">Save workout</button></div>
+  </div>
+</section>
+
 <!-- ===================== SESSIONS ===================== -->
 <section id="viewSessions" class="hidden">
+  <h2 style="font-size:16px;margin:4px 2px 8px">Saved sessions</h2>
   <select id="rowerFilter" style="margin-top:4px"></select>
   <div id="sessList" class="card"></div>
 </section>
 
 <!-- ===================== SESSION DETAIL ===================== -->
 <section id="viewDetail" class="hidden">
-  <div class="row"><button id="btnBack" class="btn small">‹ Sessions</button></div>
+  <div class="row"><button id="btnBack" class="btn small">‹ Saved sessions</button></div>
   <div class="card">
     <label class="f">Rower</label>
     <input type="text" id="dRower" placeholder="Who rowed this" autocapitalize="words">
@@ -214,6 +239,11 @@
   </div>
 
   <div class="card"><h3>Summary</h3><table id="dSummary"></table></div>
+  <div class="card hidden" id="dWorkoutCard"><h3>Workout: target vs actual</h3>
+    <div class="note" id="dWorkoutName" style="margin-bottom:6px"></div>
+    <table id="dWorkoutTable"></table>
+    <p class="note" id="dWorkoutOverall"></p>
+    <p class="note">The Rate chart under "Stroke by stroke" shows the target as a grey line.</p></div>
 
   <div class="card">
     <h3>Average curve ± 1 SD</h3>
@@ -265,6 +295,13 @@
 
 <!-- ===================== MORE ===================== -->
 <section id="viewMore" class="hidden">
+  <div class="card">
+    <h3>What shows while rowing</h3>
+    <p class="note">Individual screen = the single-erg Live screen and the Single view in multi mode.</p>
+    <label class="f">Individual screen</label><div id="disp_single"></div>
+    <label class="f">Multi-erg cards (List and Gallery)</label><div id="disp_multi"></div>
+    <p class="note">Everything is still recorded and shown in Saved sessions, whatever you hide here.</p>
+  </div>
   <div class="card">
     <h3>Ideal curve</h3>
     <label style="display:flex;gap:10px;align-items:center"><input type="checkbox" class="idealToggle" id="idealSettings" style="width:22px;height:22px"><span>Show the ideal curve on all force charts</span></label>
@@ -350,7 +387,7 @@
 <script>
 "use strict";
 /* Bump on every release so the version at the bottom of the page shows what's loaded */
-const APP_VERSION = '5.3';
+const APP_VERSION = '5.4';
 const APP_DATE = '16 Nov 2026';
 /* =====================================================================
    PM5 Bluetooth definitions (Concept2 PM5 Bluetooth Smart Interface)
@@ -505,12 +542,13 @@ function startRecording(rower) {
   const now = Date.now();
   session = { id: 's' + now, start: now, end: now, name: '', notes: '', rower: rower || '',
               dragFactor: live.general.dragFactor || null, monitor: live.monitorInfo || null,
-              forceSource: live.forceSource || null, strokes: [] };
+              forceSource: live.forceSource || null, strokes: [],
+              workout: activeWorkout() ? JSON.parse(JSON.stringify(activeWorkout())) : null, wstate: newWState() };
   live.strokes = session.strokes;
   live.pendingCurve = null;
   resetRecCounters();
-  updateRecButtons(); setStatus(); updateTiles(); drawLive();
-  log('Recording started');
+  updateRecButtons(); setStatus(); updateTiles(); drawLive(); renderWorkoutSelects();
+  log('Recording started' + (session.workout ? ' with workout: ' + workoutSummary(session.workout) : ''));
   toast('Recording – strokes from now are saved');
 }
 function updateRecButtons() {
@@ -546,7 +584,7 @@ async function finishSession(auto) {
   }
   preview.length = 0;
   live.strokes = preview; live.pendingCurve = null;
-  updateRecButtons(); setStatus(); updateTiles(); drawLive();
+  updateRecButtons(); setStatus(); updateTiles(); drawLive(); renderWorkoutSelects();
   renderSessionList();
 }
 
@@ -572,6 +610,8 @@ function onStrokeRecord(sd) {
   const pc = live.pendingCurve;
   if (pc && st.t - pc.t < 2500) { attachCurve(st, pc.raw, pc.src); live.pendingCurve = null; }
   if (session) {
+    const wp = currentSingleProgress(true);
+    if (wp) { st.target = wp.target; st.step = wp.done ? null : wp.idx; }
     session.strokes.push(st);
     session.end = st.t;
     if (live.general.dragFactor) session.dragFactor = live.general.dragFactor;
@@ -1021,7 +1061,8 @@ function chart(c, opts) {
   for (let i = 0; i <= 4; i++) {
     const yv = yMin + (yMax - yMin) * i / 4, yy = Y(yv);
     ctx.beginPath(); ctx.moveTo(L, yy); ctx.lineTo(L + pw, yy); ctx.stroke();
-    ctx.textAlign = 'right'; ctx.fillText(Math.round(yv), L - 4, yy + 3);
+    const stepV = (yMax - yMin) / 4;
+    ctx.textAlign = 'right'; ctx.fillText(Number.isInteger(stepV) || stepV >= 10 ? Math.round(yv) : yv.toFixed(stepV >= 1 ? 1 : 2), L - 4, yy + 3);
     if (opts.y2) { ctx.textAlign = 'left'; const y2v = opts.y2.min + (opts.y2.max - opts.y2.min) * i / 4;
       ctx.fillText(Math.round(y2v), L + pw + 4, yy + 3); }
   }
@@ -1061,15 +1102,14 @@ const pctX = x => Math.round(x) + '%';
    Live view
    ===================================================================== */
 function updateTiles() {
-  const s = live.strokes, last = s[s.length - 1];
-  $('tSplit').textContent = fmtSplit(live.add.currentPace);
-  $('tRate').textContent = live.add.strokeRate || '–';
-  $('tWatts').textContent = (last && last.watts) || live.addStroke.power || '–';
-  $('tPeak').textContent = last && last.peakLb ? Math.round(fConv(last.peakLb)) : '–';
-  $('tPeak').nextElementSibling.textContent = 'peak ' + uLabel();
-  $('tDist').textContent = session ? Math.round(rec.dist) : live.general.distance != null ? Math.round(live.general.distance) : '–';
-  $('tStrokes').textContent = session ? session.strokes.length : '–';
-  $('tDrive').textContent = last && last.driveLen ? last.driveLen.toFixed(2) : '–';
+  const V = tileValues({ add: live.add, lastWatts: live.addStroke.power, strokes: live.strokes, recording: !!session,
+    recTime: rec.time, recDist: rec.dist, pmTime: live.general.elapsedTime, pmDist: live.general.distance });
+  display.single.forEach(k => {
+    if (k === 'time') return;                     // the smooth clock fills this one
+    const el = $(tileId(k)); if (el && el.textContent !== String(V[k])) el.textContent = V[k];
+  });
+  const pl = document.querySelector('#tilesSingle [data-l="peak"]'); if (pl) pl.textContent = 'peak ' + uLabel();
+  updateWorkoutStrip();
   if (session) setStatus();
 }
 /* Smooth workout clock: the phone ticks on its own between PM5 messages and
@@ -1109,7 +1149,8 @@ setInterval(() => {
     if (dt >= 3.5) clock.running = false;                          // lost contact: freeze
   }
   const txt = fmtTime(t);
-  if (txt !== clock.shown) { clock.shown = txt; $('tTime').textContent = txt; }
+  if (txt !== clock.shown && $('tTime')) { clock.shown = txt; $('tTime').textContent = txt; }
+  if (session && session.workout) updateWorkoutStrip();
 }, 100);
 let liveDrawPending = false;
 function drawLive() {
@@ -1186,6 +1227,8 @@ const METRICS = [
   ['watts','Watts', s => s.watts, () => 'W'],
   ['rate','Rate', s => s.rate, () => 'spm'],
   ['split','Split', s => s.pace && s.pace < 600 ? s.pace : null, () => 's/500m'],
+  ['rec','Recovery time', s => s.recTime || null, () => 's'],
+  ['rr','Rec ÷ drive', s => s.recTime && s.driveTime ? s.recTime / s.driveTime : null, () => 'ratio'],
 ];
 
 async function openDetail(id) {
@@ -1255,6 +1298,7 @@ function renderDetail() {
     ['Avg/peak (fullness)', (mean(v(x => x.ratio)) * 100).toFixed(0) + '%'],
     ['Drive length', mean(v(x => x.driveLen)).toFixed(2) + ' m'],
     ['Drive / recovery time', mean(v(x => x.driveTime)).toFixed(2) + ' / ' + mean(v(x => x.recTime)).toFixed(2) + ' s'],
+    ['Recovery ÷ drive ratio', mean(v(x => x.recTime && x.driveTime ? x.recTime / x.driveTime : null)).toFixed(2) + ' (SD ' + sd(v(x => x.recTime && x.driveTime ? x.recTime / x.driveTime : null)).toFixed(2) + ')'],
     ['Avg heart rate', Math.round(mean(v(x => x.hr))) || '–'],
     ['Strokes with a curve', `${st.filter(x => x.curve).length}`],
   ];
@@ -1282,15 +1326,24 @@ function renderDetail() {
   $('quartLegend').innerHTML = ['1st','2nd','3rd','4th'].map((l, i) => `<span><i style="background:${qColors[i]}"></i>${l} quarter</span>`).join('');
   chart($('cQuart'), { series: qSeries, xMax: 100, xFmt: pctX, yLabel: uLabel(), empty: qSeries.length ? null : 'Not enough curves' });
 
+  renderWorkoutCard(s, st);
+
   // per stroke metric
   const M = METRICS.find(m => m[0] === detail.metric);
   const ys = st.map(M[2]);
   const ma = ys.map((_, i) => { const w = ys.slice(Math.max(0, i - 9), i + 1).filter(x => x != null); return w.length ? mean(w) : null; });
-  const vals = ys.filter(x => x != null);
+  const tg = M[0] === 'rate' ? st.map(x => x.target ?? null) : [];
+  const vals = ys.filter(x => x != null).concat(tg.filter(x => x != null));
+  const mSeries = [{ y: ys, color: '#8a9bb0', dots: true, r: 1.8 }, { y: ma, color: '#3ba3ff', width: 2.2 }];
+  if (tg.some(x => x != null)) mSeries.unshift({ y: tg, color: '#c9d2dc', width: 3, alpha: .55 });
   chart($('cMetric'), {
-    series: [{ y: ys, color: '#8a9bb0', dots: true, r: 1.8 }, { y: ma, color: '#3ba3ff', width: 2.2 }],
+    series: mSeries,
     xMax: Math.max(1, st.length - 1), yLabel: M[3](),
-    yMin: vals.length ? Math.floor(Math.min(...vals) * 0.95) : 0, yMax: vals.length ? Math.ceil(Math.max(...vals) * 1.05) : 10,
+    ...(() => {   // whole-number axis for rates so gridlines sit on real stroke rates
+      if (!vals.length) return { yMin: 0, yMax: 10 };
+      if (M[0] === 'rate') { const lo = Math.floor(Math.min(...vals)) - 1; return { yMin: lo, yMax: lo + 4 * Math.ceil((Math.ceil(Math.max(...vals)) + 1 - lo) / 4) }; }
+      return { yMin: Math.floor(Math.min(...vals) * 0.95), yMax: Math.ceil(Math.max(...vals) * 1.05) };
+    })(),
     empty: vals.length ? null : 'No data',
   });
 
@@ -1362,8 +1415,11 @@ async function deliver(name, text, mime) {
    Navigation & wiring
    ===================================================================== */
 function show(view) {
-  ['viewLive','viewSessions','viewDetail','viewMore'].forEach(v => $(v).classList.toggle('hidden', v !== view));
+  ['viewLive','viewWorkouts','viewSessions','viewDetail','viewMore'].forEach(v => $(v).classList.toggle('hidden', v !== view));
   $('tabLive').classList.toggle('active', view === 'viewLive');
+  $('tabWorkouts').classList.toggle('active', view === 'viewWorkouts');
+  if (view === 'viewWorkouts') renderWorkoutList();
+  if (view === 'viewMore') renderDisplaySettings();
   $('tabSessions').classList.toggle('active', view === 'viewSessions' || view === 'viewDetail');
   $('tabMore').classList.toggle('active', view === 'viewMore');
   if (view === 'viewLive') { drawLive(); renderMulti(); }
@@ -1372,6 +1428,7 @@ function show(view) {
 }
 $('tabLive').onclick = () => show('viewLive');
 $('tabSessions').onclick = () => show('viewSessions');
+$('tabWorkouts').onclick = () => show('viewWorkouts');
 $('tabMore').onclick = () => show('viewMore');
 $('btnBack').onclick = () => show('viewSessions');
 $('rowerFilter').onchange = () => renderSessionList();
@@ -1614,7 +1671,11 @@ class ErgSlot {
       rate: this.add.strokeRate ?? null, pace: this.add.currentPace ?? null, hr: this.add.heartRate || null,
       watts: null, curve: null };
     if (this.pending && st.t - this.pending.t < 2500) { attachCurve(st, this.pending.raw, 'pm5'); this.pending = null; }
-    if (this.session) { this.session.strokes.push(st); this.session.end = st.t; this.save(); }
+    if (this.session) {
+      const wp = this.session.workout ? workoutProgress(this.session.workout, this.session.wstate, this.rec.time, this.rec.dist) : null;
+      if (wp) { st.target = wp.target; st.step = wp.done ? null : wp.idx; }
+      this.session.strokes.push(st); this.session.end = st.t; this.save();
+    }
     else { this.preview.push(st); if (this.preview.length > 30) this.preview.shift(); }
     queueMulti(true);
   }
@@ -1647,7 +1708,8 @@ class ErgSlot {
     const now = Date.now();
     this.session = { id: `s${now}_${this.i}`, start: now, end: now, name: '', notes: '', rower: this.rower || '',
       group, erg: this.name, ergSerial: this.serial, dragFactor: this.general.dragFactor || null,
-      forceSource: this.state === 'demo' ? 'demo' : 'ble', strokes: [] };
+      forceSource: this.state === 'demo' ? 'demo' : 'ble', strokes: [],
+      workout: activeWorkout() ? JSON.parse(JSON.stringify(activeWorkout())) : null, wstate: newWState() };
     this.rec = { time: 0, dist: 0, lastT: this.general.elapsedTime ?? null, lastD: this.general.distance ?? null };
     this.pending = null;
   }
@@ -1718,16 +1780,8 @@ function setView(v) {
 /* --- rendering --- */
 const fmtW = w => w == null ? '–' : Math.round(w);
 function ergNumbers(s) {
-  const st = s.strokes, last = st[st.length - 1];
-  const t = s.session ? s.rec.time : s.general.elapsedTime;
-  const dist = s.session ? s.rec.dist : s.general.distance;
-  return {
-    split: fmtSplit(s.add.currentPace), rate: s.add.strokeRate || '–',
-    watts: fmtW((last && last.watts) ?? s.lastWatts),
-    peak: last && last.peakLb ? Math.round(fConv(last.peakLb)) : '–',
-    time: fmtTime(t), dist: dist != null ? Math.round(dist) : '–',
-    strokes: s.session ? s.session.strokes.length : '–',
-  };
+  return tileValues({ add: s.add, lastWatts: s.lastWatts, strokes: s.strokes, recording: !!s.session,
+    recTime: s.rec.time, recDist: s.rec.dist, pmTime: s.general.elapsedTime, pmDist: s.general.distance });
 }
 function stateText(s) {
   return { connecting: 'Connecting…', lost: 'Reconnecting…', demo: 'Demo', connected: s.session ? '● Recording' : 'Connected' }[s.state] || '';
@@ -1773,17 +1827,13 @@ function renderList() {
           <button class="btn small nameBtn" style="font-weight:650;font-size:15px"></button>
           <span class="note st"></span>
           <button class="btn small danger x">✕</button></div>
-        <div class="tiles" style="grid-template-columns:repeat(5,1fr);margin:8px 0 0">
-          <div class="tile"><div class="v" data-k="split">–</div><div class="l">/500m</div></div>
-          <div class="tile"><div class="v" data-k="rate">–</div><div class="l">spm</div></div>
-          <div class="tile"><div class="v" data-k="watts">–</div><div class="l">watts</div></div>
-          <div class="tile"><div class="v" data-k="peak">–</div><div class="l">peak ${uLabel()}</div></div>
-          <div class="tile"><div class="v" data-k="time">–</div><div class="l">time</div></div></div>
+        <div class="tiles" style="grid-template-columns:repeat(${Math.min(5, Math.max(1, display.multi.length))},1fr);margin:8px 0 0">${tilesHTML(display.multi, false, true)}</div>
+        <div class="tgt note" style="margin-top:6px"></div>
         <div class="note sub" style="margin-top:4px"></div>`;
       card.querySelector('.nameBtn').textContent = s.label() + ' ✎';
       card.querySelector('.nameBtn').onclick = async () => s.setRower(await pickRower(`Who's on ${s.name || 'erg ' + (s.i + 1)}?`, ''));
       card.querySelector('.x').onclick = async () => { if (await confirmBox(`Disconnect ${s.label()}?` + (s.session ? ' Their session so far will be saved.' : ''))) s.disconnect(); };
-      card.querySelectorAll('.tiles .v').forEach(v => v.style.fontSize = '17px');
+
     }
     card.dataset.slot = s.i;
     el.appendChild(card);
@@ -1797,7 +1847,7 @@ function renderGallery() {
   L.forEach(s => {
     const card = document.createElement('div'); card.className = 'card'; card.style.margin = '0'; card.style.padding = '8px';
     card.innerHTML = `<div style="font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" class="nm"></div>
-      <div class="note sub"></div><canvas height="110" style="margin-top:4px"></canvas>`;
+      <div class="note sub"></div><div class="tgt note"></div><canvas height="110" style="margin-top:4px"></canvas>`;
     card.querySelector('.nm').textContent = s.label();
     card.dataset.slot = s.i;
     card.onclick = () => { singleIndex = liveErgs().indexOf(s); if (singleIndex < 0) singleIndex = 0; setView('single'); };
@@ -1815,15 +1865,8 @@ function renderSingleErg() {
       <div style="text-align:center"><div style="font-size:20px;font-weight:700" class="nm"></div><div class="note st"></div></div>
       <button class="btn small next">›</button></div>
     <div style="text-align:center;margin-bottom:6px" class="dots"></div>
-    <div class="tiles" style="margin-top:4px">
-      <div class="tile"><div class="v" data-k="split">–</div><div class="l">/500m</div></div>
-      <div class="tile"><div class="v" data-k="rate">–</div><div class="l">spm</div></div>
-      <div class="tile"><div class="v" data-k="watts">–</div><div class="l">watts</div></div>
-      <div class="tile"><div class="v" data-k="peak">–</div><div class="l">peak ${uLabel()}</div></div>
-      <div class="tile"><div class="v" data-k="time">–</div><div class="l">time</div></div>
-      <div class="tile"><div class="v" data-k="dist">–</div><div class="l">metres</div></div>
-      <div class="tile"><div class="v" data-k="strokes">–</div><div class="l">strokes</div></div>
-      <div class="tile"><div class="v" data-k="drive">–</div><div class="l">drive m</div></div></div>
+    <div class="tgt note" style="text-align:center;margin:4px 0"></div>
+    <div class="tiles" style="margin-top:4px">${tilesHTML(display.single, false, false)}</div>
     <div class="card" style="margin-top:6px"><canvas height="240"></canvas>
       <div class="legend"><span><i style="background:var(--accent)"></i>this stroke</span><span><i style="background:#8a9bb0"></i>last 5</span><span><i style="background:var(--accent2)"></i>session average</span></div></div>
     <p class="note" style="text-align:center">Swipe left or right to change rower</p>`;
@@ -1872,13 +1915,24 @@ function updateMultiNumbers() {
     a3El.innerHTML = '';
     if (isLead) { const b = document.createElement('span'); b.className = 'leadBadge'; b.textContent = '▲ Leading  '; a3El.appendChild(b); }
     a3El.appendChild(document.createTextNode(a3 ? `3-stroke avg: ${fmtSplit(a3.pace)} · ${Math.round(a3.watts)} W` : '3-stroke avg: –'));
-    const st = s.strokes, last = st[st.length - 1];
-    N.drive = last && last.driveLen ? last.driveLen.toFixed(2) : '–';
+    const wp = s.session && s.session.workout ? workoutProgress(s.session.workout, { ...s.session.wstate }, s.rec.time, s.rec.dist)
+      : null;
+    const tl = wp ? trafficFor(s.strokes, wp.target) : null;
+    applyTraffic(card.querySelector('[data-k="rate"]'), tl);
+    const tg = card.querySelector('.tgt');
+    if (tg) {
+      tg.innerHTML = '';
+      if (wp) {
+        const pill = document.createElement('span'); pill.className = 'pill ' + (tl ? tl.cls : 'none');
+        pill.textContent = wp.done ? 'Done' : `${tl ? tl.avg.toFixed(1) : '–'} / ${wp.target} spm`;
+        tg.append(pill, document.createTextNode(progressText(wp, s.session.workout)));
+      } else if (!s.session && activeWorkout()) tg.textContent = 'Workout ready – starts with Start recording all';
+    }
     card.querySelectorAll('[data-k]').forEach(v => { const val = N[v.dataset.k]; if (val != null && v.textContent !== String(val)) v.textContent = val; });
     const stEl = card.querySelector('.st'); if (stEl) stEl.textContent = stateText(s);
     const sub = card.querySelector('.sub');
     if (sub) sub.textContent = multiView === 'gallery'
-      ? `${N.split} · ${N.watts} W · ${N.rate} spm`
+      ? display.multi.map(k => `${N[k]}${({ split: '', rate: ' spm', watts: ' W', peak: ' ' + uLabel(), time: '', dist: ' m', strokes: ' str', drive: ' m drive', rec: ' s rec', ratio: ' ratio' })[k] || ''}`).join(' · ')
       : `${s.name || ''}${s.serial ? ' · #' + s.serial : ''}${s.session ? ' · ' + N.strokes + ' strokes · ' + N.dist + ' m' : ''}${s.noCurve ? ' · no force curves' : ''}`;
   });
 }
@@ -1908,6 +1962,7 @@ function multiStart() {
   if (!liveErgs().length) return;
   multiGroup = 'g' + Date.now(); multiRecording = true;
   liveErgs().forEach(s => s.startRecording(multiGroup));
+  renderWorkoutSelects();
   log(`Multi: recording started on ${liveErgs().length} erg(s)`);
   toast('Recording all connected ergs');
   renderMulti();
@@ -1918,7 +1973,7 @@ async function multiFinish() {
   for (const s of ergs) saved += await s.finish();
   multiRecording = false;
   toast(`Saved ${saved} session${saved === 1 ? '' : 's'}`);
-  renderMulti(); renderSessionList();
+  renderMulti(); renderSessionList(); renderWorkoutSelects();
 }
 function multiStatus() {
   const n = liveErgs().length;
@@ -1966,8 +2021,256 @@ $('iFixed').onchange = e => { const v = +e.target.value; if (v >= 100 && v <= 20
 $('iReset').onclick = () => { ideal = { ...IDEAL_DEFAULT }; idealChanged(); };
 $('tabMore').addEventListener('click', () => setTimeout(syncIdealUI, 0));
 
+/* =====================================================================
+   DISPLAY SETTINGS: which numbers show on the individual screen
+   (single erg + multi Single view) and on multi List/Gallery cards
+   ===================================================================== */
+const TILE_DEFS = [
+  ['split', () => '/500m', 'Split'], ['rate', () => 'spm', 'Rate'], ['watts', () => 'watts', 'Watts'],
+  ['peak', () => 'peak ' + uLabel(), 'Peak force'], ['time', () => 'time', 'Time'], ['dist', () => 'metres', 'Metres'],
+  ['strokes', () => 'strokes', 'Strokes'], ['drive', () => 'drive m', 'Drive length'],
+  ['rec', () => 'recovery s', 'Recovery time'], ['ratio', () => 'rec ÷ drive', 'Recovery ÷ drive ratio'],
+];
+const DISPLAY_DEFAULT = { single: ['split','rate','watts','peak','time','dist','strokes','drive'], multi: ['split','rate','watts','peak','time'] };
+let display = JSON.parse(JSON.stringify(DISPLAY_DEFAULT));
+try { const d = JSON.parse(localStorage.getItem('ergcurve-display') || 'null'); if (d && Array.isArray(d.single) && Array.isArray(d.multi)) display = d; } catch (e) {}
+function saveDisplay() { try { localStorage.setItem('ergcurve-display', JSON.stringify(display)); } catch (e) {} }
+const tileId = k => 't' + k[0].toUpperCase() + k.slice(1);
+function tileValues(c) {
+  const st = c.strokes, last = st[st.length - 1];
+  const t = c.recording ? c.recTime : c.pmTime, d = c.recording ? c.recDist : c.pmDist;
+  return {
+    split: fmtSplit(c.add.currentPace), rate: c.add.strokeRate || '–',
+    watts: (last && last.watts) ?? c.lastWatts ?? '–',
+    peak: last && last.peakLb ? Math.round(fConv(last.peakLb)) : '–',
+    time: fmtTime(t), dist: d != null ? Math.round(d) : '–',
+    strokes: c.recording ? st.length : '–',
+    drive: last && last.driveLen ? last.driveLen.toFixed(2) : '–',
+    rec: last && last.recTime ? last.recTime.toFixed(2) : '–',
+    ratio: last && last.recTime && last.driveTime ? (last.recTime / last.driveTime).toFixed(1) : '–',
+  };
+}
+function tilesHTML(keys, idMode, small) {
+  return keys.map(k => { const def = TILE_DEFS.find(x => x[0] === k); if (!def) return '';
+    return `<div class="tile"><div class="v" ${idMode ? `id="${tileId(k)}"` : `data-k="${k}"`}${small ? ' style="font-size:17px"' : ''}>–</div><div class="l" data-l="${k}">${def[1]()}</div></div>`; }).join('');
+}
+function buildSingleTiles() {
+  const el = $('tilesSingle'); el.innerHTML = tilesHTML(display.single, true, false);
+  clock.shown = null;
+}
+function renderDisplaySettings() {
+  ['single', 'multi'].forEach(group => {
+    const el = $('disp_' + group); el.innerHTML = '';
+    TILE_DEFS.forEach(([k, , name]) => {
+      const lab = document.createElement('label'); lab.style.cssText = 'display:flex;gap:10px;align-items:center;padding:5px 0';
+      const cb = document.createElement('input'); cb.type = 'checkbox'; cb.style.cssText = 'width:20px;height:20px'; cb.checked = display[group].includes(k);
+      cb.onchange = () => {
+        const set = new Set(display[group]); cb.checked ? set.add(k) : set.delete(k);
+        display[group] = TILE_DEFS.map(d => d[0]).filter(x => set.has(x));
+        saveDisplay(); buildSingleTiles(); updateTiles(); renderMulti();
+      };
+      const sp = document.createElement('span'); sp.textContent = name;
+      lab.append(cb, sp); el.appendChild(lab);
+    });
+  });
+}
+
+/* =====================================================================
+   TRAFFIC LIGHTS: 3-stroke average rate against the target rate.
+   Green = on target (within half a beat), orange = 1 beat off, red = 2+ off
+   ===================================================================== */
+function trafficFor(strokes, target) {
+  if (target == null) return null;
+  const r = strokes.filter(x => x.rate).slice(-3);
+  if (!r.length || Date.now() - r[r.length - 1].t > 10000) return null;
+  const avg = mean(r.map(x => x.rate)), diff = Math.abs(avg - target);
+  return { avg, cls: diff < 0.5 ? 'green' : diff < 1.5 ? 'orange' : 'red' };
+}
+function applyTraffic(valueEl, tl) {
+  if (!valueEl) return;
+  const tile = valueEl.closest('.tile');
+  [valueEl, tile].forEach(e => e && e.classList.remove('tl-green', 'tl-orange', 'tl-red'));
+  if (tl) { valueEl.classList.add('tl-' + tl.cls); if (tile) tile.classList.add('tl-' + tl.cls); }
+}
+
+/* =====================================================================
+   WORKOUTS: saved plans (steady = one target rate; stepped = steps by
+   time or distance, each with a target rate). A recording copies the
+   active workout, and every stroke saves its target rate.
+   ===================================================================== */
+function getWorkouts() { try { return JSON.parse(localStorage.getItem('ergcurve-workouts') || '[]'); } catch (e) { return []; } }
+function setWorkouts(w) { try { localStorage.setItem('ergcurve-workouts', JSON.stringify(w)); } catch (e) {} }
+let activeWorkoutId = '';
+try { activeWorkoutId = localStorage.getItem('ergcurve-active-workout') || ''; } catch (e) {}
+function setActiveWorkout(id) {
+  activeWorkoutId = id || ''; try { localStorage.setItem('ergcurve-active-workout', activeWorkoutId); } catch (e) {}
+  renderWorkoutSelects(); renderWorkoutList(); updateWorkoutStrip(); renderMulti();
+}
+function activeWorkout() { return getWorkouts().find(w => w.id === activeWorkoutId) || null; }
+const amountStr = s => s.kind === 'time' ? fmtTime(s.amount) : `${s.amount} m`;
+function workoutSummary(w) {
+  if (!w) return '';
+  return w.type === 'steady' ? `Steady · ${w.rate} spm` : w.steps.map(s => `${amountStr(s)} @ ${s.rate}`).join(' → ');
+}
+const newWState = () => ({ idx: 0, startT: 0, startD: 0 });
+/* Advances ws through completed steps; returns the current target. t, d = time/metres since recording started */
+function workoutProgress(w, ws, t, d) {
+  if (!w) return null;
+  if (w.type === 'steady') return { target: w.rate, idx: 0, n: 1, remaining: null, done: false };
+  const n = w.steps.length;
+  while (ws.idx < n) {
+    const s = w.steps[ws.idx];
+    const prog = s.kind === 'time' ? t - ws.startT : d - ws.startD;
+    if (prog < s.amount) return { target: s.rate, idx: ws.idx, n, remaining: s.amount - prog, kind: s.kind, done: false };
+    if (s.kind === 'time') { ws.startT += s.amount; ws.startD = d; } else { ws.startD += s.amount; ws.startT = t; }
+    ws.idx++;
+  }
+  return { target: null, idx: n, n, remaining: null, done: true };
+}
+function progressText(wp, w) {
+  if (!wp) return '';
+  if (wp.done) return 'Workout complete ✓';
+  if (w.type === 'steady') return `Target ${wp.target} spm`;
+  const left = wp.kind === 'time' ? fmtTime(Math.max(0, wp.remaining)) + ' left' : Math.max(0, Math.round(wp.remaining)) + ' m left';
+  return `Step ${wp.idx + 1}/${wp.n} · target ${wp.target} spm · ${left}`;
+}
+function renderWorkoutSelects() {
+  document.querySelectorAll('.wSelect').forEach(sel => {
+    sel.innerHTML = '';
+    const o0 = document.createElement('option'); o0.value = ''; o0.textContent = 'Free row (no workout)'; sel.appendChild(o0);
+    getWorkouts().forEach(w => { const o = document.createElement('option'); o.value = w.id; o.textContent = w.name || workoutSummary(w); sel.appendChild(o); });
+    sel.value = activeWorkout() ? activeWorkoutId : '';
+    sel.disabled = !!session || (typeof multiRecording !== 'undefined' && multiRecording);
+  });
+}
+/* single-erg strip + rate traffic light */
+function currentSingleProgress(advance) {
+  if (!session || !session.workout) return null;
+  const ws = advance ? session.wstate : { ...session.wstate };
+  return workoutProgress(session.workout, ws, rec.time, rec.dist);
+}
+function updateWorkoutStrip() {
+  const el = $('wStrip'); if (!el) return;
+  let big = '', small = '';
+  if (session && session.workout) {
+    const wp = currentSingleProgress(false);
+    big = wp.done ? 'Done ✓' : wp.target + ' spm';
+    small = (session.workout.name ? session.workout.name + ' · ' : '') + progressText(wp, session.workout);
+    applyTraffic($('tRate'), trafficFor(live.strokes, wp.target));
+  } else {
+    const w = activeWorkout();
+    if (w && !session) { big = 'Ready'; small = `${w.name || 'Workout'}: ${workoutSummary(w)}. Starts when you tap Start recording.`; }
+    applyTraffic($('tRate'), null);
+  }
+  el.classList.toggle('hidden', !small);
+  el.querySelector('.big').textContent = big; el.querySelector('.small').textContent = small;
+}
+
+/* --- Workouts tab --- */
+let wEdit = null;   // workout being edited
+function renderWorkoutList() {
+  const el = $('wList'); if (!el) return;
+  const ws = getWorkouts(); el.innerHTML = '';
+  if (!ws.length) { el.innerHTML = '<p class="note">No workouts yet. Tap + New workout.</p>'; return; }
+  ws.forEach(w => {
+    const row = document.createElement('div'); row.className = 'sess'; row.style.cursor = 'default';
+    row.innerHTML = '<div style="min-width:0"><div class="t"></div><div class="m"></div></div><div class="row" style="flex-wrap:nowrap;gap:6px"></div>';
+    row.querySelector('.t').textContent = (w.id === activeWorkoutId ? '✓ ' : '') + (w.name || 'Untitled');
+    row.querySelector('.m').textContent = workoutSummary(w);
+    const btns = row.querySelector('.row');
+    const mk = (txt, cls, fn) => { const b = document.createElement('button'); b.className = 'btn small ' + cls; b.textContent = txt; b.onclick = fn; btns.appendChild(b); };
+    mk(w.id === activeWorkoutId ? 'Active' : 'Use', w.id === activeWorkoutId ? 'primary' : '', () => setActiveWorkout(w.id === activeWorkoutId ? '' : w.id));
+    mk('Edit', '', () => openWorkoutEditor(w));
+    mk('✕', 'danger', async () => { if (await confirmBox(`Delete workout "${w.name || 'Untitled'}"? Saved sessions keep their own copy.`)) {
+      setWorkouts(getWorkouts().filter(x => x.id !== w.id)); if (activeWorkoutId === w.id) setActiveWorkout(''); renderWorkoutList(); renderWorkoutSelects(); } });
+    el.appendChild(row);
+  });
+}
+function parseAmount(kind, txt) {
+  txt = String(txt).trim();
+  if (kind === 'dist') { const m = parseFloat(txt); return m > 0 ? Math.round(m) : null; }
+  if (txt.includes(':')) { const [m, s] = txt.split(':').map(Number); return (m * 60 + s) > 0 ? m * 60 + s : null; }
+  const m = parseFloat(txt); return m > 0 ? Math.round(m * 60) : null;     // plain number = minutes
+}
+function openWorkoutEditor(w) {
+  wEdit = w ? JSON.parse(JSON.stringify(w)) : { id: '', name: '', type: 'stepped', rate: 20,
+    steps: [{ kind: 'time', amount: 240, rate: 20 }, { kind: 'time', amount: 240, rate: 22 }, { kind: 'time', amount: 240, rate: 24 }] };
+  if (!wEdit.steps || !wEdit.steps.length) wEdit.steps = [{ kind: 'time', amount: 240, rate: wEdit.rate || 20 }];
+  $('wEdTitle').textContent = w ? 'Edit workout' : 'New workout';
+  $('wName').value = wEdit.name; $('wType').value = wEdit.type; $('wRate').value = wEdit.rate || 20;
+  renderStepRows(); syncTypeBoxes();
+  $('wEditor').classList.remove('hidden'); $('wEditor').scrollIntoView({ behavior: 'smooth' });
+}
+function syncTypeBoxes() {
+  $('wSteadyBox').classList.toggle('hidden', $('wType').value !== 'steady');
+  $('wStepsBox').classList.toggle('hidden', $('wType').value !== 'stepped');
+}
+function renderStepRows() {
+  const el = $('wSteps'); el.innerHTML = '';
+  wEdit.steps.forEach((s, i) => {
+    const row = document.createElement('div'); row.className = 'row'; row.style.cssText = 'flex-wrap:nowrap;gap:6px;margin:6px 0;align-items:center';
+    row.innerHTML = `<span class="note" style="width:18px">${i + 1}</span>
+      <select class="k" style="width:auto;flex:1.1"><option value="time">Time</option><option value="dist">Metres</option></select>
+      <input class="a" type="text" inputmode="decimal" style="flex:1" placeholder="4:00">
+      <input class="r" type="number" inputmode="numeric" style="flex:.8" placeholder="spm">
+      <span class="note">spm</span><button class="btn small danger x">✕</button>`;
+    row.querySelector('.k').value = s.kind;
+    row.querySelector('.a').value = s.kind === 'time' ? fmtTime(s.amount) : s.amount;
+    row.querySelector('.r').value = s.rate;
+    row.querySelector('.k').onchange = e => { s.kind = e.target.value; s.amount = s.kind === 'time' ? 240 : 1000; renderStepRows(); };
+    row.querySelector('.a').onchange = e => { const v = parseAmount(s.kind, e.target.value); if (v) s.amount = v; renderStepRows(); };
+    row.querySelector('.r').onchange = e => { const v = +e.target.value; if (v >= 10 && v <= 60) s.rate = v; };
+    row.querySelector('.x').onclick = () => { if (wEdit.steps.length > 1) { wEdit.steps.splice(i, 1); renderStepRows(); } };
+    el.appendChild(row);
+  });
+}
+function saveWorkoutFromEditor() {
+  // pick up any field the user typed but didn't leave
+  document.querySelectorAll('#wSteps .row').forEach((row, i) => {
+    const s = wEdit.steps[i]; const v = parseAmount(s.kind, row.querySelector('.a').value); if (v) s.amount = v;
+    const r = +row.querySelector('.r').value; if (r >= 10 && r <= 60) s.rate = r;
+  });
+  wEdit.name = $('wName').value.trim(); wEdit.type = $('wType').value;
+  const r = +$('wRate').value; if (r >= 10 && r <= 60) wEdit.rate = r;
+  if (!wEdit.name) wEdit.name = workoutSummary(wEdit);
+  const all = getWorkouts();
+  if (!wEdit.id) { wEdit.id = 'w' + Date.now(); all.push(wEdit); } else { const i = all.findIndex(x => x.id === wEdit.id); if (i >= 0) all[i] = wEdit; else all.push(wEdit); }
+  setWorkouts(all);
+  $('wEditor').classList.add('hidden');
+  if (!activeWorkoutId) activeWorkoutId = wEdit.id;
+  setActiveWorkout(activeWorkoutId);
+  toast('Workout saved');
+}
+
+/* --- session detail: workout card --- */
+function renderWorkoutCard(s, st) {
+  const card = $('dWorkoutCard'), w = s.workout;
+  card.classList.toggle('hidden', !w);
+  if (!w) return;
+  $('dWorkoutName').textContent = (w.name || 'Workout') + ' · ' + workoutSummary(w);
+  const steps = w.type === 'steady' ? [{ rate: w.rate, label: 'Whole piece' }] : w.steps.map((x, i) => ({ rate: x.rate, label: `${i + 1}. ${amountStr(x)}` }));
+  const rows = steps.map((stp, i) => {
+    const ss = st.filter(x => (w.type === 'steady' || x.step === i) && x.rate);
+    const avg = ss.length ? mean(ss.map(x => x.rate)) : null;
+    const on = ss.length ? 100 * ss.filter(x => Math.abs(x.rate - stp.rate) < 0.5).length / ss.length : null;
+    return [stp.label, stp.rate, avg == null ? '–' : avg.toFixed(1), on == null ? '–' : Math.round(on) + '%', ss.length];
+  });
+  const tbl = $('dWorkoutTable'); tbl.innerHTML = '<tr><td class="note">Step</td><td class="note">Target</td><td class="note">Avg rate</td><td class="note">On target</td></tr>';
+  rows.forEach(r => { const tr = document.createElement('tr');
+    [r[0], r[1] + ' spm', r[2], r[3]].forEach(v => { const td = document.createElement('td'); td.textContent = v; tr.appendChild(td); }); tbl.appendChild(tr); });
+  const all = st.filter(x => x.target != null && x.rate);
+  $('dWorkoutOverall').textContent = all.length ? `Overall: ${Math.round(100 * all.filter(x => Math.abs(x.rate - x.target) < 0.5).length / all.length)}% of strokes on the target rate (within half a beat).` : '';
+}
+
+$('wNew').onclick = () => openWorkoutEditor(null);
+$('wCancel').onclick = () => $('wEditor').classList.add('hidden');
+$('wSave').onclick = () => saveWorkoutFromEditor();
+$('wType').onchange = () => syncTypeBoxes();
+$('wAddStep').onclick = () => { const last = wEdit.steps[wEdit.steps.length - 1]; wEdit.steps.push({ ...last, rate: Math.min(60, last.rate + 2) }); renderStepRows(); };
+document.querySelectorAll('.wSelect').forEach(sel => sel.onchange = e => setActiveWorkout(e.target.value));
+
 (async function init() {
-  $('appVersion').textContent = `ErgCurve v${APP_VERSION} · ${APP_DATE}`;
+  $('appVersion').textContent = `ErgCurve Test v${APP_VERSION} · ${APP_DATE}`;
   if (!navigator.bluetooth) showNoBt();
   try { await DB.open(); } catch (e) {
     $('storageNote').textContent = 'Storage unavailable in this browser mode (private browsing?) – sessions will not be saved.';
@@ -1984,6 +2287,7 @@ $('tabMore').addEventListener('click', () => setTimeout(syncIdealUI, 0));
     const all = await DB.all();
     for (const s of all) if (s.strokes.length < 3) await DB.del(s.id);
   } catch (e) {}
+  buildSingleTiles(); renderWorkoutSelects(); renderDisplaySettings();
   applyMode(); renderRosterEditor(); syncIdealUI();
   setStatus(); updateTiles(); drawLive();
   if (location.hash === '#demo-fast') { startDemo(true); startRecording(); }   // used for automated testing

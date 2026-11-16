@@ -54,6 +54,7 @@
 "use strict";
 // Newest first. Add a row for every release.
 const RELEASES = [
+  ['5.4', 'Workouts tab (steady or stepped by time/metres), target rate while rowing with traffic-light colours, per-step target vs actual and grey target line in saved sessions, recovery time and ratio, display settings, "Saved sessions" tab, "Test" version label'],
   ['5.3', 'Multi mode: green highlight on the leader (highest watts, 3-stroke average) and each rower\'s 3-stroke average split and watts'],
   ['5.2', 'Ideal curve: adjustable target shape in Settings, shown on live, multi and session charts, with an on/off toggle on each. "Backup & info" renamed Settings'],
   ['5.1', 'Security lockdown (page can\'t load or send anything to other sites), automated test suite, this checklist page'],
@@ -83,6 +84,17 @@ const CHECKS = [
     ['Clock ticks smoothly and freezes when you stop rowing', '', '4.2'],
     ['Page doesn\'t keep getting longer as you row', '', '1.0'],
   ]],
+  ['Workouts & target rate', [
+    ['Create a stepped workout in the Workouts tab (e.g. 3 steps) and it appears in the Live tab picker', '', '5.4'],
+    ['While recording: strip shows step, target rate and time/metres left, and steps change on time', '', '5.4'],
+    ['Rate tile goes green on target, orange 1 beat off, red 2+ off (3-stroke average)', '', '5.4'],
+    ['Multi cards show the coloured target pill for each rower', '', '5.4'],
+    ['Saved session: Workout card shows target vs actual per step; Rate chart shows the grey target line', '', '5.4'],
+  ]],
+  ['Display settings', [
+    ['Settings → What shows while rowing: switching tiles on/off changes the Live screen and multi cards', '', '5.4'],
+    ['Recovery time and ratio can be shown while rowing, and are always in Saved sessions charts', '', '5.4'],
+  ]],
   ['Ideal curve', [
     ['Purple dashed ideal curve shows behind the rower\'s curve', 'Live tab, once the first stroke is in', '5.2'],
     ['Toggling "Show ideal curve" while rowing hides and shows it straight away', '', '5.2'],
@@ -94,7 +106,7 @@ const CHECKS = [
     ['Saved curves are normal shape, NOT sloping down from the left', 'Check the session\'s average curve afterwards', '4.1'],
   ]],
   ['After the session', [
-    ['Session appears in Sessions with the rower\'s name', ''],
+    ['Session appears in Saved sessions with the rower\'s name', ''],
     ['Summary time and distance only count recorded strokes', '', '4.3'],
     ['From / To stroke and Min drive length filters change the stroke count', '', '3.0'],
     ['Export (CSV or Copy) works from Bluefy', 'Share sheet or Copy option', '2.0'],
