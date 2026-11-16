@@ -54,6 +54,7 @@
 "use strict";
 // Newest first. Add a row for every release.
 const RELEASES = [
+  ['5.2', 'Ideal curve: adjustable target shape in Settings, shown on live, multi and session charts, with an on/off toggle on each. "Backup & info" renamed Settings'],
   ['5.1', 'Security lockdown (page can\'t load or send anything to other sites), automated test suite, this checklist page'],
   ['5.0', 'Multi-erg mode (up to 8 PM5s; List / Gallery / Single views; record all). Saved rower names with you pinned first'],
   ['4.4', 'Rower name prompt on Start recording; rower filter in Sessions'],
@@ -81,6 +82,12 @@ const CHECKS = [
     ['Clock ticks smoothly and freezes when you stop rowing', '', '4.2'],
     ['Page doesn\'t keep getting longer as you row', '', '1.0'],
   ]],
+  ['Ideal curve', [
+    ['Purple dashed ideal curve shows behind the rower\'s curve', 'Live tab, once the first stroke is in', '5.2'],
+    ['Toggling "Show ideal curve" while rowing hides and shows it straight away', '', '5.2'],
+    ['Settings → Ideal curve sliders change the shape, and the live chart follows', '', '5.2'],
+    ['Ideal curve also shows in multi mode and on a saved session\'s average curve', '', '5.2'],
+  ]],
   ['Single erg – live draw ON', [
     ['Green curve grows during the drive', 'Text under the switch shows several updates per drive'],
     ['Saved curves are normal shape, NOT sloping down from the left', 'Check the session\'s average curve afterwards', '4.1'],
@@ -99,7 +106,7 @@ const CHECKS = [
     ['Gallery view: both curves update after each stroke; tap opens Single', ''],
     ['Single view: swipe changes rower', ''],
     ['Start recording all → Finish & save all gives one session per rower', ''],
-    ['Neither erg dropped out during the test', 'If one did, screenshot the Connection log'],
+    ['Neither erg dropped out during the test', 'If one did, screenshot Settings → Connection log'],
   ]],
 ];
 const $ = id => document.getElementById(id);

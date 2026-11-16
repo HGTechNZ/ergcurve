@@ -99,7 +99,7 @@
 <nav>
   <button id="tabLive" class="active">Live</button>
   <button id="tabSessions">Sessions</button>
-  <button id="tabMore">Backup & info</button>
+  <button id="tabMore">Settings</button>
 </nav>
 
 <main>
@@ -139,6 +139,9 @@
       <span><i style="background:var(--accent2)"></i>session average</span>
       <span><i style="background:var(--good)"></i>drawing live</span>
     </div>
+    <label style="display:flex;gap:10px;align-items:center;margin-top:8px">
+      <input type="checkbox" class="idealToggle" id="idealLive" style="width:22px;height:22px">
+      <span>Show ideal curve <i style="display:inline-block;width:18px;height:0;border-top:3px dashed #c084fc;vertical-align:middle"></i></span></label>
     <label style="display:flex;gap:10px;align-items:center;margin-top:10px">
       <input type="checkbox" id="liveDraw" style="width:22px;height:22px">
       <span>Live draw during the drive <span class="note">(experimental)</span></span></label>
@@ -163,6 +166,9 @@
     <div id="mList"></div>
     <div id="mGallery" class="hidden" style="display:grid;grid-template-columns:1fr 1fr;gap:8px"></div>
     <div id="mSingle" class="hidden"></div>
+    <label style="display:flex;gap:10px;align-items:center;margin-top:8px">
+      <input type="checkbox" class="idealToggle" id="idealMulti" style="width:22px;height:22px">
+      <span>Show ideal curve <i style="display:inline-block;width:18px;height:0;border-top:3px dashed #c084fc;vertical-align:middle"></i></span></label>
     <p class="note">Multi mode: live draw is off, curves appear after each drive. Use the button top right to switch List / Gallery / Single.</p>
   </div>
 </section>
@@ -212,6 +218,9 @@
       <span><i style="background:#3ba3ff55;height:8px"></i>±1 SD (consistency)</span>
       <span id="cmpLegend" class="hidden"><i style="background:var(--accent2)"></i>compare session</span>
     </div>
+    <label style="display:flex;gap:10px;align-items:center;margin-top:8px">
+      <input type="checkbox" class="idealToggle" id="idealDetail" style="width:22px;height:22px">
+      <span>Show ideal curve <i style="display:inline-block;width:18px;height:0;border-top:3px dashed #c084fc;vertical-align:middle"></i></span></label>
     <label class="f">Compare with another session</label>
     <select id="dCompare"></select>
     <p class="note">X axis is % of the drive, so strokes of different length line up.</p>
@@ -251,6 +260,23 @@
 
 <!-- ===================== MORE ===================== -->
 <section id="viewMore" class="hidden">
+  <div class="card">
+    <h3>Ideal curve</h3>
+    <label style="display:flex;gap:10px;align-items:center"><input type="checkbox" class="idealToggle" id="idealSettings" style="width:22px;height:22px"><span>Show the ideal curve on all force charts</span></label>
+    <canvas id="cIdeal" height="190" style="margin-top:10px"></canvas>
+    <p class="note" id="idealStats"></p>
+    <label class="f">Peak position: <b id="vPos"></b> of the drive</label>
+    <input type="range" id="iPos" min="20" max="65" step="1" style="width:100%">
+    <label class="f">Catch: <b id="vCatch"></b> <span class="note">(1 gradual … 10 sharp, fast hang-on)</span></label>
+    <input type="range" id="iCatch" min="1" max="10" step="1" style="width:100%">
+    <label class="f">Finish: <b id="vFinish"></b> <span class="note">(1 releases early … 10 holds force to the finish)</span></label>
+    <input type="range" id="iFinish" min="1" max="10" step="1" style="width:100%">
+    <label class="f">Height of the ideal curve</label>
+    <select id="iScale"><option value="rower">Match each rower's peak</option><option value="fixed">Fixed target force</option></select>
+    <div id="iFixedWrap"><label class="f">Target peak force (N)</label><input type="number" id="iFixed" inputmode="numeric" min="100" max="2000" step="10"></div>
+    <div class="row" style="margin-top:10px"><button id="iReset" class="btn small">Reset to default</button></div>
+    <p class="note">Default: a generic coaching shape, with a quick catch, one smooth peak about 40% of the way through the drive, no dips, and a smooth finish. Coaches differ on the exact shape, so set it to yours.</p>
+  </div>
   <div class="card">
     <h3>Backup</h3>
     <p class="note">Sessions live in this browser's storage on this phone. Export a backup now and then (to Google Drive, iCloud, email…). Clearing browser data deletes them.</p>
@@ -319,7 +345,7 @@
 <script>
 "use strict";
 /* Bump on every release so the version at the bottom of the page shows what's loaded */
-const APP_VERSION = '5.1';
+const APP_VERSION = '5.2';
 const APP_DATE = '16 Nov 2026';
 /* =====================================================================
    PM5 Bluetooth definitions (Concept2 PM5 Bluetooth Smart Interface)
@@ -402,6 +428,33 @@ function curveMetrics(raw) {
   const avg = mean(raw);
   return { cPeak: pk, cAvg: avg, peakPos: 100 * pi / (raw.length - 1),
            ratio: pk ? avg / pk : 0, nPts: raw.length };
+}
+
+/* =====================================================================
+   Ideal curve: a target shape drawn behind the rower's curves.
+   Default = generic coaching shape: quick catch, one smooth peak at ~40%
+   of the drive, no dips, smooth fade to the finish. Adjustable in Settings.
+   ===================================================================== */
+const IDEAL_DEFAULT = { on: true, pos: 40, catchLvl: 7, finishLvl: 6, scale: 'rower', fixedN: 800 };
+let ideal = { ...IDEAL_DEFAULT };
+try { Object.assign(ideal, JSON.parse(localStorage.getItem('ergcurve-ideal') || '{}')); } catch (e) {}
+function saveIdeal() { try { localStorage.setItem('ergcurve-ideal', JSON.stringify(ideal)); } catch (e) {} }
+/* normalised shape, peak = 1. catchLvl 1 (gradual) .. 10 (sharp); finishLvl 1 (releases early) .. 10 (holds long) */
+function idealShape(n = CURVE_PTS) {
+  const p = ideal.pos / 100, a = 1.7 - 0.13 * ideal.catchLvl, b = 2.0 - 0.17 * ideal.finishLvl, out = [];
+  for (let i = 0; i < n; i++) {
+    const x = i / (n - 1);
+    out.push(x <= p ? Math.pow(Math.sin(Math.PI / 2 * x / p), a) : Math.pow(Math.max(0, Math.cos(Math.PI / 2 * (x - p) / (1 - p))), b));
+  }
+  return out;
+}
+/* rs = curves already in chart units; scales the ideal to their typical peak (or a fixed force) */
+function idealFor(rs) {
+  if (!ideal.on) return null;
+  let pk;
+  if (ideal.scale === 'fixed') pk = units === 'N' ? ideal.fixedN : ideal.fixedN / LB_TO_N;
+  else { if (!rs || !rs.length) return null; pk = mean(rs.slice(-10).map(r => Math.max(...r))); }
+  return { y: idealShape().map(v => v * pk), color: '#c084fc', width: 2.5, dash: [8, 5] };
 }
 
 /* =====================================================================
@@ -1068,6 +1121,7 @@ function drawLiveNow() {
     withCurve.slice(-6, -1).forEach(s => series.push({ y: resample(s.curve).map(fConv), color: '#8a9bb0', alpha: .35, width: 1.5 }));
     if (rs.length > 1) series.push({ y: avg, color: '#ff9f43', width: 2, dash: [5,4] });
     series.push({ y: rs[rs.length - 1], color: '#3ba3ff', width: 3, alpha: LiveDraw.buf.length ? .35 : 1 });
+    const id = idealFor(rs); if (id) series.unshift(id);
   }
   if (LiveDraw.buf.length) {
     const lens = withCurve.slice(-5).map(s => s.curve.length);
@@ -1207,6 +1261,7 @@ function renderDetail() {
   if (ac) {
     series.push({ y: ac.mean.map((m, i) => m + ac.sd[i]), fillTo: ac.mean.map((m, i) => Math.max(0, m - ac.sd[i])), color: '#3ba3ff', alpha: .22 });
     series.push({ y: ac.mean, color: '#3ba3ff', width: 3 });
+    const id = idealFor([ac.mean]); if (id) series.unshift(id);
   }
   const cmp = sessionsCache.find(x => x.id === detail.cmp);
   $('cmpLegend').classList.toggle('hidden', !cmp);
@@ -1247,7 +1302,8 @@ function drawSingle(st) {
     `peak ${x.peakLb ? Math.round(fConv(x.peakLb)) : '?'} ${uLabel()} at ${x.peakPos != null ? x.peakPos.toFixed(0) + '%' : '?'} · drive ${x.driveLen?.toFixed(2) ?? '?'} m`;
   const ac = avgCurve(st);
   const series = [];
-  if (ac) series.push({ y: ac.mean, color: '#8a9bb0', width: 1.5, dash: [4,4] });
+  if (ac) { series.push({ y: ac.mean, color: '#8a9bb0', width: 1.5, dash: [4,4] });
+    const id = idealFor([ac.mean]); if (id) series.unshift(id); }
   if (x.curve) series.push({ y: resample(x.curve).map(fConv), color: '#3ba3ff', width: 3 });
   chart($('cStroke'), { series, xMax: 100, xFmt: pctX, yLabel: uLabel(), empty: x.curve ? null : 'No curve for this stroke' });
 }
@@ -1679,6 +1735,7 @@ function curveSeries(s, big) {
   if (big) withCurve.slice(-6, -1).forEach(x => series.push({ y: resample(x.curve).map(fConv), color: '#8a9bb0', alpha: .35, width: 1.5 }));
   if (rs.length > 1) series.push({ y: rs[0].map((_, k) => mean(rs.map(r => r[k]))), color: '#ff9f43', width: big ? 2 : 1.5, dash: [5, 4] });
   series.push({ y: rs[rs.length - 1], color: '#3ba3ff', width: big ? 3 : 2.2 });
+  const id = idealFor(rs); if (id) { if (!big) id.width = 1.8; series.unshift(id); }
   return series;
 }
 function renderMulti() {
@@ -1848,6 +1905,33 @@ $('meName').value = myName();
 $('meName').onchange = e => { try { localStorage.setItem('ergcurve-me', e.target.value.trim()); } catch (x) {} };
 $('tabMore').addEventListener('click', renderRosterEditor);
 
+function syncIdealUI() {
+  document.querySelectorAll('.idealToggle').forEach(c => c.checked = !!ideal.on);
+  $('iPos').value = ideal.pos; $('vPos').textContent = ideal.pos + '%';
+  $('iCatch').value = ideal.catchLvl; $('vCatch').textContent = ideal.catchLvl;
+  $('iFinish').value = ideal.finishLvl; $('vFinish').textContent = ideal.finishLvl;
+  $('iScale').value = ideal.scale; $('iFixed').value = ideal.fixedN;
+  $('iFixedWrap').classList.toggle('hidden', ideal.scale !== 'fixed');
+  const sh = idealShape();
+  $('idealStats').textContent = `Peak at ${ideal.pos}% of the drive · fullness (average ÷ peak) ${Math.round(100 * mean(sh))}%`;
+  if (!$('viewMore').classList.contains('hidden')) {
+    const pk = ideal.scale === 'fixed' ? (units === 'N' ? ideal.fixedN : ideal.fixedN / LB_TO_N) : (units === 'N' ? 800 : 800 / LB_TO_N);
+    chart($('cIdeal'), { series: [{ y: sh.map(v => v * pk), color: '#c084fc', width: 3 }], xMax: 100, xFmt: pctX, yLabel: uLabel() });
+  }
+}
+function idealChanged() {
+  saveIdeal(); syncIdealUI(); drawLive(); renderMulti(); drawMultiCurves();
+  if (!$('viewDetail').classList.contains('hidden')) renderDetail();
+}
+document.querySelectorAll('.idealToggle').forEach(c => c.onchange = () => { ideal.on = c.checked; idealChanged(); });
+$('iPos').oninput = e => { ideal.pos = +e.target.value; idealChanged(); };
+$('iCatch').oninput = e => { ideal.catchLvl = +e.target.value; idealChanged(); };
+$('iFinish').oninput = e => { ideal.finishLvl = +e.target.value; idealChanged(); };
+$('iScale').onchange = e => { ideal.scale = e.target.value; idealChanged(); };
+$('iFixed').onchange = e => { const v = +e.target.value; if (v >= 100 && v <= 2000) ideal.fixedN = v; idealChanged(); };
+$('iReset').onclick = () => { ideal = { ...IDEAL_DEFAULT }; idealChanged(); };
+$('tabMore').addEventListener('click', () => setTimeout(syncIdealUI, 0));
+
 (async function init() {
   $('appVersion').textContent = `ErgCurve v${APP_VERSION} · ${APP_DATE}`;
   if (!navigator.bluetooth) showNoBt();
@@ -1866,7 +1950,7 @@ $('tabMore').addEventListener('click', renderRosterEditor);
     const all = await DB.all();
     for (const s of all) if (s.strokes.length < 3) await DB.del(s.id);
   } catch (e) {}
-  applyMode(); renderRosterEditor();
+  applyMode(); renderRosterEditor(); syncIdealUI();
   setStatus(); updateTiles(); drawLive();
   if (location.hash === '#demo-fast') { startDemo(true); startRecording(); }   // used for automated testing
 })();
