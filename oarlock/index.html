@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b1a2e">
+<title>Oarlock Live</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<style>
+  :root { --bg:#0b1a2e; --card:#13263f; --ink:#eef3f8; --dim:#8ea3b8; --acc:#4fc3f7; --catch:#ffb74d; --fin:#81c784; --bad:#ef5350; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:system-ui,-apple-system,Roboto,sans-serif; background:var(--bg); color:var(--ink);
+         -webkit-user-select:none; user-select:none; }
+  header { display:flex; align-items:center; justify-content:space-between; padding:14px 16px 6px; }
+  h1 { font-size:18px; margin:0; letter-spacing:.5px; }
+  #status { font-size:13px; color:var(--dim); }
+  #status.ok { color:var(--fin); } #status.err { color:var(--bad); }
+  main { padding:6px 14px 24px; max-width:520px; margin:0 auto; }
+  .card { background:var(--card); border-radius:16px; padding:14px; margin-bottom:12px; }
+  #angle { font-size:88px; font-weight:700; text-align:center; line-height:1; font-variant-numeric:tabular-nums; margin:4px 0 2px; }
+  #angleLbl { text-align:center; color:var(--dim); font-size:13px; }
+  svg { width:100%; height:auto; display:block; }
+  .stats { display:grid; grid-template-columns:repeat(4,1fr); gap:6px; text-align:center; }
+  .stats b { display:block; font-size:26px; font-variant-numeric:tabular-nums; }
+  .stats span { font-size:11px; color:var(--dim); text-transform:uppercase; letter-spacing:.5px; }
+  .row { display:flex; gap:8px; }
+  button { flex:1; font-size:17px; font-weight:600; padding:16px 10px; border-radius:12px; border:0;
+           background:var(--acc); color:#04223a; }
+  button.sec { background:#24405f; color:var(--ink); }
+  button:disabled { opacity:.4; }
+  #cal { display:none; }
+  #calStep { font-size:20px; font-weight:700; text-align:center; margin:6px 0; }
+  #calHint { color:var(--dim); text-align:center; font-size:14px; margin-bottom:10px; }
+  #calLog { font-size:13px; color:var(--dim); font-family:ui-monospace,monospace; white-space:pre-line; margin-top:8px; }
+  .note { font-size:12px; color:var(--dim); text-align:center; margin-top:8px; }
+  #demoTag { display:none; text-align:center; color:var(--catch); font-weight:700; font-size:13px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>OARLOCK LIVE</h1>
+  <div id="status">Not connected</div>
+</header>
+<main>
+  <div class="card">
+    <div id="demoTag">DEMO MODE: simulated oar, not a real oarlock</div>
+    <div id="angle">--</div>
+    <div id="angleLbl">oar angle (degrees, 0 = square to the boat)</div>
+    <svg viewBox="0 0 300 165" aria-label="oar angle gauge">
+      <path id="strokeArc" fill="none" stroke="#4fc3f7" stroke-opacity=".25" stroke-width="22"/>
+      <path id="track" fill="none" stroke="#24405f" stroke-width="6"/>
+      <g id="ticks"></g>
+      <line id="needle" x1="150" y1="150" x2="150" y2="25" stroke="#eef3f8" stroke-width="5" stroke-linecap="round"/>
+      <circle cx="150" cy="150" r="8" fill="#eef3f8"/>
+      <text x="22" y="162" fill="#ffb74d" font-size="12">CATCH</text>
+      <text x="236" y="162" fill="#81c784" font-size="12">FINISH</text>
+    </svg>
+  </div>
+
+  <div class="card">
+    <div class="stats">
+      <div><b id="sCatch">--</b><span>Catch</span></div>
+      <div><b id="sFin">--</b><span>Finish</span></div>
+      <div><b id="sLen">--</b><span>Length</span></div>
+      <div><b id="sRate">--</b><span>Rate</span></div>
+    </div>
+    <div class="note" id="strokeNote">Stats update after each stroke</div>
+  </div>
+
+  <div class="card" id="cal">
+    <div id="calStep"></div>
+    <div id="calHint">Hold the oar firmly against the peg, keep still, then tap Capture</div>
+    <div class="row">
+      <button id="calCap">Capture</button>
+      <button class="sec" id="calCancel">Cancel</button>
+    </div>
+    <div id="calLog"></div>
+  </div>
+
+  <div class="row" style="margin-bottom:8px">
+    <button id="btnConnect">Connect oarlock</button>
+  </div>
+  <div class="row">
+    <button class="sec" id="btnCal" disabled>Calibrate</button>
+    <button class="sec" id="btnDemo">Demo mode</button>
+  </div>
+  <div class="note" id="calInfo"></div>
+  <div class="note">Use Chrome. Turn on Bluetooth and Location. SpeedCoach must be off.</div>
+</main>
+
+<script>
+"use strict";
+// ---------- NK EmPower protocol ----------
+const SVC_CTRL   = "85920000-0338-4b83-ae4a-ac1d217adb03";
+const CTRL_REPLY = "85920100-0338-4b83-ae4a-ac1d217adb03";
+const CTRL_CMD   = "85920200-0338-4b83-ae4a-ac1d217adb03";
+const SVC_DATA   = "12630000-dd25-497d-9854-9b6c02c77054";
+const DATA1      = "12630001-dd25-497d-9854-9b6c02c77054";
+// Command 0x0063 (start streaming) + 13-entry field table -> raw angle on Data1 at 20 Hz
+const START_PAYLOAD = hex(
+  "6300" + "0d00" +
+  "31002b000200" + "32002b000200" + "220028000200" + "23002d000200" + "25002b000200" +
+  "26002e000100" + "27002e000100" + "280028000200" + "29002e000100" + "2a002e000100" +
+  "2b002e000100" + "33002e000100" + "34002e000100");
+
+function hex(s) { const a = new Uint8Array(s.length / 2); for (let i = 0; i < a.length; i++) a[i] = parseInt(s.substr(i * 2, 2), 16); return a; }
+function crcX25(bytes) {
+  let crc = 0xFFFF;
+  for (const b of bytes) { crc ^= b; for (let i = 0; i < 8; i++) crc = (crc & 1) ? (crc >>> 1) ^ 0x8408 : crc >>> 1; }
+  return (crc ^ 0xFFFF) & 0xFFFF;
+}
+function buildFrame(type, payload) {
+  const body = [type & 255, type >> 8, payload.length & 255, payload.length >> 8, ...payload];
+  const c = crcX25(body); body.push(c & 255, c >> 8);
+  const out = [0x7E];
+  for (const b of body) { if (b === 0x7E || b === 0x7D) out.push(0x7D, b ^ 0x20); else out.push(b); }
+  out.push(0x7E);
+  return new Uint8Array(out);
+}
+
+// ---------- calibration (monotone curve through the pegs) ----------
+const PEGS = [["B", -59], ["D", -19], ["C", 17], ["A", 61]];
+// Default = Harry's test oarlock 1103748, pin-calibrated 23 Nov 2026
+const DEFAULT_CAL = [[19994, -59], [8051, -19], [-9911, 17], [-20111, 61]];
+let calPts = loadCal();
+let rawToDeg = makeCurve(calPts);
+
+function loadCal() {
+  try { const s = localStorage.getItem("oarlockCal"); if (s) { const p = JSON.parse(s); if (p.length >= 2) return p; } } catch (e) {}
+  return DEFAULT_CAL;
+}
+function saveCal(p) { try { localStorage.setItem("oarlockCal", JSON.stringify(p)); } catch (e) {} }
+function makeCurve(points) {
+  const pts = points.slice().sort((a, b) => a[0] - b[0]);
+  const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]), n = xs.length;
+  const h = [], d = [];
+  for (let i = 0; i < n - 1; i++) { h.push(xs[i + 1] - xs[i]); d.push((ys[i + 1] - ys[i]) / h[i]); }
+  const m = new Array(n).fill(0); m[0] = d[0]; m[n - 1] = d[n - 2];
+  for (let i = 1; i < n - 1; i++) {
+    if (d[i - 1] * d[i] <= 0) m[i] = 0;
+    else { const w1 = 2 * h[i] + h[i - 1], w2 = h[i] + 2 * h[i - 1]; m[i] = (w1 + w2) / (w1 / d[i - 1] + w2 / d[i]); }
+  }
+  return r => {
+    if (r <= xs[0]) return ys[0] + d[0] * (r - xs[0]);
+    if (r >= xs[n - 1]) return ys[n - 1] + d[n - 2] * (r - xs[n - 1]);
+    let i = 0; while (i < n - 2 && xs[i + 1] <= r) i++;
+    const t = (r - xs[i]) / h[i], t2 = t * t, t3 = t2 * t;
+    return (2*t3 - 3*t2 + 1) * ys[i] + (t3 - 2*t2 + t) * h[i] * m[i] + (-2*t3 + 3*t2) * ys[i+1] + (t3 - t2) * h[i] * m[i+1];
+  };
+}
+
+// ---------- stroke detection ----------
+const HYST = 5;
+const st = { mode: "catch", ext: null, extT: 0, catchA: null, catchT: null, finA: null, finT: null, n: 0 };
+function feedStroke(t, a) {
+  if (st.ext === null) { st.ext = a; st.extT = t; return; }
+  if (st.mode === "catch") {
+    if (a < st.ext) { st.ext = a; st.extT = t; }
+    else if (a > st.ext + HYST) {
+      if (st.catchT !== null && st.finA !== null) {
+        const cycle = (st.extT - st.catchT) / 1000;
+        if (cycle > 1 && cycle < 10 && st.n > 0) showStroke(st.catchA, st.finA, 60 / cycle);
+        st.n++;
+      } else st.n++;
+      st.catchA = st.ext; st.catchT = st.extT; st.mode = "finish"; st.ext = a; st.extT = t;
+    }
+  } else {
+    if (a > st.ext) { st.ext = a; st.extT = t; }
+    else if (a < st.ext - HYST) { st.finA = st.ext; st.finT = st.extT; st.mode = "catch"; st.ext = a; st.extT = t; }
+  }
+}
+function resetStrokes() { Object.assign(st, { mode: "catch", ext: null, catchA: null, catchT: null, finA: null, n: 0 }); }
+
+// ---------- UI ----------
+const $ = id => document.getElementById(id);
+const CX = 150, CY = 150, R = 125, MAXA = 75;
+function polar(deg, r) { const th = (deg / MAXA) * (Math.PI / 2); return [CX + r * Math.sin(th), CY - r * Math.cos(th)]; }
+function arcPath(a1, a2, r) { const [x1, y1] = polar(a1, r), [x2, y2] = polar(a2, r); return `M${x1},${y1} A${r},${r} 0 0 1 ${x2},${y2}`; }
+$("track").setAttribute("d", arcPath(-MAXA, MAXA, R + 12));
+(function ticks() {
+  let s = "";
+  for (let a = -60; a <= 60; a += 30) {
+    const [x1, y1] = polar(a, R + 4), [x2, y2] = polar(a, R + 20), [tx, ty] = polar(a, R - 12);
+    s += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#8ea3b8" stroke-width="2"/>`;
+    s += `<text x="${tx}" y="${ty + 4}" fill="#8ea3b8" font-size="11" text-anchor="middle">${a > 0 ? "+" : ""}${a}</text>`;
+  }
+  $("ticks").innerHTML = s;
+})();
+
+let curAngle = null, lastRaw = null, lastPacket = 0;
+function showStroke(c, f, rate) {
+  $("sCatch").textContent = c.toFixed(0); $("sFin").textContent = "+" + f.toFixed(0).replace("-", "");
+  if (f < 0) $("sFin").textContent = f.toFixed(0);
+  $("sLen").textContent = (f - c).toFixed(0); $("sRate").textContent = rate.toFixed(0);
+  $("strokeArc").setAttribute("d", arcPath(Math.max(-MAXA, c), Math.min(MAXA, f), R - 30));
+  $("strokeNote").textContent = `Stroke ${st.n}: length in degrees, rate in strokes/min`;
+}
+function draw() {
+  if (curAngle !== null) {
+    $("angle").textContent = (curAngle > 0 ? "+" : "") + curAngle.toFixed(1);
+    const a = Math.max(-MAXA, Math.min(MAXA, curAngle)), [x, y] = polar(a, R - 2);
+    $("needle").setAttribute("x2", x); $("needle").setAttribute("y2", y);
+  }
+  requestAnimationFrame(draw);
+}
+requestAnimationFrame(draw);
+function setStatus(txt, cls) { const s = $("status"); s.textContent = txt; s.className = cls || ""; }
+function showCalInfo() {
+  const isDef = calPts === DEFAULT_CAL;
+  $("calInfo").textContent = isDef ? "Using saved calibration for oarlock 1103748 (23 Nov). Recalibrate if the gate has moved."
+                                   : "Using your latest calibration on this phone.";
+}
+showCalInfo();
+
+function onRaw(raw) {
+  lastRaw = raw; lastPacket = Date.now();
+  rawSamples.push(raw); if (rawSamples.length > 400) rawSamples.splice(0, 200);
+  curAngle = rawToDeg(raw);
+  feedStroke(Date.now(), curAngle);
+}
+
+// ---------- Bluetooth ----------
+let device = null, demoTimer = null;
+const rawSamples = [];
+
+async function connect() {
+  stopDemo();
+  if (!navigator.bluetooth) { setStatus("No Web Bluetooth: open this page in Chrome", "err"); return; }
+  try {
+    setStatus("Pick the EmPower oarlock...");
+    device = await navigator.bluetooth.requestDevice({ filters: [{ namePrefix: "EmPower" }], optionalServices: [SVC_CTRL, SVC_DATA, "battery_service"] });
+    device.addEventListener("gattserverdisconnected", () => { setStatus("Disconnected: tap Connect", "err"); $("btnConnect").textContent = "Reconnect"; });
+    await startStream();
+  } catch (e) { setStatus("Connect failed: " + e.message, "err"); }
+}
+async function startStream() {
+  setStatus("Connecting to " + device.name + "...");
+  const server = await device.gatt.connect();
+  const data = await server.getPrimaryService(SVC_DATA);
+  const ctrl = await server.getPrimaryService(SVC_CTRL);
+  const d1 = await data.getCharacteristic(DATA1);
+  d1.addEventListener("characteristicvaluechanged", ev => {
+    const v = ev.target.value; if (v.byteLength >= 8) onRaw(v.getInt16(6, true));
+  });
+  await d1.startNotifications();
+  const reply = await ctrl.getCharacteristic(CTRL_REPLY);
+  try { await reply.startNotifications(); } catch (e) {}
+  const cmd = await ctrl.getCharacteristic(CTRL_CMD);
+  const frame = buildFrame(0, START_PAYLOAD);
+  for (let i = 0; i < frame.length; i += 20) {
+    const chunk = frame.slice(i, i + 20);
+    if (cmd.writeValueWithResponse) await cmd.writeValueWithResponse(chunk); else await cmd.writeValue(chunk);
+  }
+  resetStrokes();
+  setStatus("Live: " + device.name, "ok");
+  $("btnConnect").textContent = "Reconnect"; $("btnCal").disabled = false;
+  try { if (navigator.wakeLock) await navigator.wakeLock.request("screen"); } catch (e) {}
+  setTimeout(() => { if (Date.now() - lastPacket > 2500) setStatus("Connected but no data: remove and refit the oarlock battery, then Reconnect", "err"); }, 3000);
+}
+
+// ---------- demo mode (simulated, for showing the screen without an oarlock) ----------
+function startDemo() {
+  if (demoTimer) { stopDemo(); return; }
+  $("demoTag").style.display = "block"; $("btnDemo").textContent = "Stop demo";
+  setStatus("Demo (simulated)"); resetStrokes();
+  const t0 = Date.now(), inv = makeCurve(calPts.map(p => [p[1], p[0]])); // degrees -> raw
+  demoTimer = setInterval(() => {
+    const t = (Date.now() - t0) / 1000, ph = (t % 3) / 3;           // 20 spm
+    const drive = 0.4, c = -57 + Math.sin(t / 7) * 2, f = 44 + Math.cos(t / 5) * 2;
+    const deg = ph < drive ? c + (f - c) * (1 - Math.cos(Math.PI * ph / drive)) / 2
+                           : f - (f - c) * (1 - Math.cos(Math.PI * (ph - drive) / (1 - drive))) / 2;
+    onRaw(Math.round(inv(deg)));
+  }, 50);
+}
+function stopDemo() { if (demoTimer) { clearInterval(demoTimer); demoTimer = null; } $("demoTag").style.display = "none"; $("btnDemo").textContent = "Demo mode"; }
+
+// ---------- calibration wizard ----------
+let calIdx = 0, newCal = [];
+function calStart() { calIdx = 0; newCal = []; $("cal").style.display = "block"; $("calLog").textContent = ""; calShow(); }
+function calShow() { const [p, d] = PEGS[calIdx]; $("calStep").textContent = `Step ${calIdx + 1}/4: peg ${p} (${d > 0 ? "+" : ""}${d}°)`; }
+async function calCapture() {
+  $("calCap").disabled = true; $("calCap").textContent = "Hold still...";
+  rawSamples.length = 0;
+  await new Promise(r => setTimeout(r, 1500));
+  const s = rawSamples.slice();
+  $("calCap").disabled = false; $("calCap").textContent = "Capture";
+  if (s.length < 10) { $("calLog").textContent += "No data, check connection\n"; return; }
+  const mean = s.reduce((a, b) => a + b, 0) / s.length;
+  const sd = Math.sqrt(s.reduce((a, b) => a + (b - mean) ** 2, 0) / s.length);
+  if (sd > 60) { $("calLog").textContent += `Peg ${PEGS[calIdx][0]}: moving (wobble ${sd.toFixed(0)}), try again\n`; return; }
+  newCal.push([Math.round(mean), PEGS[calIdx][1]]);
+  $("calLog").textContent += `Peg ${PEGS[calIdx][0]}: raw ${mean.toFixed(0)} ✓\n`;
+  calIdx++;
+  if (calIdx < PEGS.length) { calShow(); return; }
+  const raws = newCal.map(p => p[0]);
+  const mono = raws.every((r, i) => i === 0 || r < raws[i - 1]) || raws.every((r, i) => i === 0 || r > raws[i - 1]);
+  if (!mono) { $("calLog").textContent += "Pegs out of order, start again\n"; calIdx = 0; newCal = []; calShow(); return; }
+  calPts = newCal; rawToDeg = makeCurve(calPts); saveCal(calPts); resetStrokes(); showCalInfo();
+  $("calStep").textContent = "Calibrated ✓"; $("calHint").textContent = "Check: peg A should read about +61";
+  setTimeout(() => { $("cal").style.display = "none"; $("calHint").textContent = "Hold the oar firmly against the peg, keep still, then tap Capture"; }, 2500);
+}
+
+$("btnConnect").onclick = () => (device && !device.gatt.connected) ? startStream().catch(e => setStatus("Reconnect failed: " + e.message, "err")) : connect();
+$("btnDemo").onclick = startDemo;
+$("btnCal").onclick = calStart;
+$("calCap").onclick = calCapture;
+$("calCancel").onclick = () => { $("cal").style.display = "none"; };
+if ("serviceWorker" in navigator) { navigator.serviceWorker.register("sw.js").catch(() => {}); }
+</script>
+</body>
+</html>
