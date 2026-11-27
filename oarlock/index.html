@@ -195,7 +195,7 @@ function makeCurve(points) {
 }
 
 // ---------- stroke detection ----------
-const HYST = 5;
+const HYST = 5, MIN_LEN = 25; // a stroke must sweep at least 25° to count
 const st = { mode: "catch", ext: null, extT: 0, catchA: null, catchT: null, finA: null, finT: null, n: 0 };
 function feedStroke(t, a) {
   if (st.ext === null) { st.ext = a; st.extT = t; return; }
@@ -204,7 +204,7 @@ function feedStroke(t, a) {
     else if (a > st.ext + HYST) {
       if (st.catchT !== null && st.finA !== null) {
         const cycle = (st.extT - st.catchT) / 1000;
-        if (cycle > 1 && cycle < 10 && st.n > 0) showStroke(st.catchA, st.finA, 60 / cycle);
+        if (cycle > 1 && cycle < 10 && st.n > 0 && st.finA - st.catchA >= MIN_LEN) showStroke(st.catchA, st.finA, 60 / cycle);
         st.n++;
       } else st.n++;
       st.catchA = st.ext; st.catchT = st.extT; st.mode = "finish"; st.ext = a; st.extT = t;
@@ -281,7 +281,9 @@ function onDrive(t0, t1) {
   if (D.length < 4) return;
   let pk = 0, pa = 0; D.forEach(s => { if (s.f > pk) { pk = s.f; pa = s.a; } });
   const cat = Math.min(...D.map(s => s.a)), fin = Math.max(...D.map(s => s.a));
+  if (fin - cat < MIN_LEN) return; // wiggle or static push, not a stroke
   const d = { s: D, t0, peak: pk, peakA: pa, catch: cat, finish: fin };
+  $("sCatch").textContent = cat.toFixed(0); $("sFin").textContent = (fin > 0 ? "+" : "") + fin.toFixed(0); $("sLen").textContent = (fin - cat).toFixed(0);
   if (pk > 20) {
     const thr = 0.3 * pk; let r = D.findIndex(s => s.f >= thr), l = D.length - 1; while (l > 0 && D[l].f < thr) l--;
     d.slip = D[r].a - cat; d.wash = fin - D[l].a; d.eff = (fin - cat) - d.slip - d.wash;
