@@ -1,0 +1,638 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b1a2e">
+<title>Boat Recorder</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<style>
+:root { --bg:#0b1a2e; --card:#13263f; --line:#24405f; --ink:#eef3f8; --dim:#8ea3b8; --acc:#4fc3f7; --drill:#ffb74d; --ok:#81c784; --bad:#ef5350; --badt:#ef9a9a; }
+* { box-sizing:border-box; min-width:0; }
+html, body { margin:0; height:100%; }
+body { background:var(--bg); color:var(--ink); font:15px/1.4 system-ui,-apple-system,Roboto,sans-serif; overflow:hidden; -webkit-user-select:none; user-select:none; }
+.num { font-family:"Roboto Condensed","Barlow Condensed",system-ui,sans-serif; font-weight:700; font-variant-numeric:tabular-nums; line-height:.9; }
+.scr { display:none; position:fixed; inset:0; flex-direction:column; overflow-y:auto; padding-bottom:env(safe-area-inset-bottom); }
+.scr.on { display:flex; }
+.top { display:flex; align-items:center; gap:4px; padding:10px 8px 8px; }
+.top h1 { margin:0; font-size:20px; flex:1; }
+.back { width:44px; height:44px; border:0; background:none; color:var(--ink); display:grid; place-items:center; }
+.steps { display:grid; grid-template-columns:repeat(4,1fr); gap:6px; padding:0 16px 12px; font-size:12px; color:var(--dim); }
+.steps div i { display:block; height:4px; border-radius:2px; background:var(--line); margin-bottom:5px; }
+.steps div.done i { background:var(--acc); } .steps div.cur { color:var(--ink); font-weight:600; }
+.body { padding:0 16px; display:flex; flex-direction:column; gap:10px; flex:1; }
+.foot { padding:10px 16px 18px; display:flex; flex-direction:column; gap:8px; }
+.card { background:var(--card); border-radius:14px; padding:12px; }
+button, .btn { font:600 16px system-ui,sans-serif; min-height:48px; border-radius:12px; border:0; background:var(--line); color:var(--ink); padding:0 14px; }
+.pri { background:var(--acc); color:#04223a; font-weight:700; }
+.go { background:var(--ok); color:#0a2410; font-weight:700; }
+.big { min-height:60px; font-size:19px; }
+button:disabled { opacity:.4; }
+button:focus-visible, input:focus-visible, select:focus-visible { outline:3px solid var(--acc); outline-offset:2px; }
+.dim { color:var(--dim); font-size:13px; }
+.pill { font-size:12px; font-weight:700; padding:3px 9px; border-radius:99px; white-space:nowrap; }
+.p-ok { background:#17351f; color:var(--ok); } .p-w { background:#3a2a10; color:var(--drill); } .p-b { background:#3b1a1d; color:var(--badt); }
+input, select { font:16px system-ui,sans-serif; min-height:44px; padding:0 10px; border-radius:10px; border:1px solid #2d4a6b; background:var(--bg); color:var(--ink); width:100%; }
+label.f { display:flex; flex-direction:column; gap:4px; font-size:12px; font-weight:600; color:var(--dim); }
+.row { display:flex; gap:8px; align-items:center; }
+.grid2 { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
+.grid4 { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:6px; }
+.seatb { min-height:44px; padding:0 8px; border-radius:8px; font-size:14px; }
+.chip { min-height:44px; padding:0 14px; border-radius:99px; border:1px solid #2d4a6b; background:none; color:var(--ink); font-size:14px; flex:none; }
+.chip.on { border-color:var(--drill); background:#3a2a10; color:var(--drill); }
+.check { display:flex; gap:12px; align-items:center; padding:9px 0; border-bottom:1px solid var(--line); }
+.check:last-child { border:0; } .check b { display:block; font-size:15px; }
+.ic { width:22px; height:22px; flex:none; }
+.peg { display:flex; align-items:center; gap:12px; padding:8px 0; border-bottom:1px solid var(--line); }
+.peg .k { width:36px; height:36px; border-radius:9px; background:var(--line); display:grid; place-items:center; font-weight:700; color:var(--dim); }
+.peg.done .k { background:var(--ok); color:#04223a; } .peg.cur .k { background:var(--acc); color:#04223a; }
+/* cox */
+.strip { display:flex; align-items:center; gap:10px; padding:8px 14px; border-bottom:1px solid #1c3452; flex:none; }
+.rec { display:flex; align-items:center; gap:6px; font-weight:700; color:var(--badt); font-size:14px; }
+.rec i { width:11px; height:11px; border-radius:50%; background:var(--bad); animation:bl 1.2s infinite; }
+@keyframes bl { 50% { opacity:.3; } } @media (prefers-reduced-motion:reduce) { .rec i { animation:none; } }
+.gd { display:flex; align-items:center; gap:3px; font-size:12px; color:var(--dim); }
+.gd i { width:10px; height:10px; border-radius:50%; background:var(--ok); } .gd.off i { background:var(--bad); } .gd.off { color:var(--badt); }
+.cox { flex:1; display:flex; gap:12px; padding:10px 14px 14px; min-height:0; }
+.panels { flex:1; display:grid; grid-template-columns:3fr 2fr; gap:10px; }
+.panel { background:var(--card); border-radius:16px; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:6px; }
+.panel .l { font-size:14px; font-weight:600; color:var(--dim); }
+.side { width:210px; flex:none; display:flex; flex-direction:column; gap:8px; }
+.drillbtn { flex:1; background:var(--drill); color:#2a1700; font-size:24px; font-weight:700; border-radius:16px; }
+.stopbtn { flex:1; background:var(--bad); color:#fff; font-size:24px; font-weight:700; border-radius:16px; }
+.dpanel { background:#2a1f0c; border:2px solid var(--drill); }
+#vSplit { font-size:min(26vh,15vw); } #vRate { font-size:min(36vh,20vw); } #vDrillN { font-size:min(40vh,22vw); color:var(--drill); }
+@media (orientation:portrait) { .cox { flex-direction:column; } .side { width:auto; flex-direction:row; } .side > * { flex:1; min-height:64px; } .panels { grid-template-columns:1fr; } #vSplit { font-size:22vw; } #vRate { font-size:28vw; } #vDrillN { font-size:30vw; } }
+.banner { padding:8px 14px; font-weight:700; display:none; }
+.banner.on { display:block; }
+.bwarn { background:#3b1a1d; color:var(--badt); } .bdrill { background:var(--drill); color:#2a1700; }
+/* modal */
+.modal { position:fixed; inset:0; background:rgba(5,12,22,.8); display:none; align-items:center; justify-content:center; z-index:20; padding:16px; }
+.modal.on { display:flex; }
+.modal .box { background:var(--card); border-radius:16px; padding:16px; max-width:640px; width:100%; max-height:100%; overflow:auto; display:flex; flex-direction:column; gap:10px; }
+#toast { position:fixed; left:50%; top:12px; transform:translateX(-50%); background:var(--ink); color:var(--bg); padding:10px 16px; border-radius:12px; font-weight:600; opacity:0; transition:opacity .2s; pointer-events:none; z-index:30; max-width:90vw; }
+#toast.on { opacity:1; }
+.tl { position:relative; height:28px; border-radius:8px; overflow:hidden; background:var(--line); }
+.tl i { position:absolute; top:0; bottom:0; background:var(--drill); color:#2a1700; font-size:12px; font-weight:700; font-style:normal; display:grid; place-items:center; }
+.tl b { position:absolute; top:0; bottom:0; width:3px; background:var(--acc); }
+.tl s { position:absolute; top:0; bottom:0; background:repeating-linear-gradient(45deg,#3b1a1d 0 4px,#24405f 4px 8px); }
+</style>
+</head>
+<body>
+
+<!-- HOME -->
+<section class="scr on" id="s-home">
+  <div style="padding:26px 20px 6px">
+    <div class="dim" style="font-weight:600">CBHS Rowing</div>
+    <h1 style="margin:0;font-size:32px;line-height:1.1">Boat Recorder</h1>
+  </div>
+  <div class="body">
+    <div class="card" id="resumeCard" style="display:none;border:2px solid var(--drill)">
+      <b>Session still recording</b><div class="dim" id="resumeTxt"></div>
+      <div class="row" style="margin-top:8px"><button class="go big" id="btnResume" style="flex:2">Resume session</button><button id="btnEndOld" style="flex:1">End it</button></div>
+    </div>
+    <button class="pri big" id="btnNew">New session</button>
+    <div class="dim" style="text-align:center">Rig the boat and turn all four gates on first</div>
+    <div class="row" style="justify-content:space-between;margin-top:8px"><b style="font-size:16px">Saved sessions</b><span class="dim" id="storeTxt"></span></div>
+    <div id="sessList"><div class="dim">None yet.</div></div>
+  </div>
+  <div class="foot">
+    <div class="row"><button id="btnUpdate" style="flex:1">Update now</button><button id="btnBackup" style="flex:1">Back up settings</button><button id="btnRestore" style="flex:1">Restore</button></div>
+    <input type="file" id="restoreFile" accept=".json,application/json" hidden>
+    <div class="dim" style="text-align:center" id="verTxt"></div>
+  </div>
+</section>
+
+<!-- CONNECT -->
+<section class="scr" id="s-connect">
+  <div class="top"><button class="back" data-go="home" aria-label="Back"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M15 5l-7 7 7 7"/></svg></button><h1>Connect gates</h1></div>
+  <div class="steps" data-step="1"></div>
+  <div class="body">
+    <div class="dim">Boat</div><div class="row" id="sizeSel"></div>
+    <div class="dim">Turn each gate on, tap <b>Add gate</b> and pick it. Then set its seat, side (change it for a tandem rig) and who is rowing. Seats count from the bow.</div>
+    <div id="gateList"></div>
+    <div class="row"><button class="pri" id="btnAdd" style="flex:1">Add gate</button><button id="btnSim" style="flex:none">Simulate 4</button></div>
+  </div>
+  <div class="foot"><button class="pri big" data-go="rig">Next: record the rig</button></div>
+</section>
+
+<!-- RIG -->
+<section class="scr" id="s-rig">
+  <div class="top"><button class="back" data-go="connect" aria-label="Back"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M15 5l-7 7 7 7"/></svg></button><h1>Record the rig</h1></div>
+  <div class="steps" data-step="2"></div>
+  <div class="body">
+    <div class="card" style="display:flex;flex-direction:column;gap:8px">
+      <div class="row" style="justify-content:space-between"><b>Boat</b><button id="btnCopyRig" style="min-height:40px;font-size:14px">Copy last rig</button></div>
+      <input id="rBoat" placeholder="Boat name" aria-label="Boat name">
+      <div class="grid2"><label class="f">Oar length (cm)<input id="rOar" inputmode="decimal"></label><label class="f">Inboard (cm)<input id="rIn" inputmode="decimal"></label></div>
+    </div>
+    <div class="card">
+      <div style="display:grid;grid-template-columns:64px repeat(3,minmax(0,1fr));gap:6px;font-size:12px;font-weight:600;color:var(--dim);text-align:center;margin-bottom:6px"><span style="text-align:left">Seat</span><span>Height cm</span><span>Span cm</span><span>Pitch °</span></div>
+      <div id="rigRows" style="display:flex;flex-direction:column;gap:6px"></div>
+    </div>
+    <div class="dim">Saved with the session. Blank is fine if you didn't measure it.</div>
+  </div>
+  <div class="foot"><button class="pri big" data-go="cal">Next: calibrate</button></div>
+</section>
+
+<!-- CALIBRATE -->
+<section class="scr" id="s-cal">
+  <div class="top"><button class="back" data-go="rig" aria-label="Back"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M15 5l-7 7 7 7"/></svg></button><h1>Calibrate</h1></div>
+  <div class="steps" data-step="3"></div>
+  <div class="body">
+    <div class="grid4" id="calTabs"></div>
+    <div class="card" style="text-align:center">
+      <div class="dim" id="calWho">--</div>
+      <div class="num" id="calDeg" style="font-size:72px">--</div>
+      <div class="dim" id="calHint">Fit the pin tool, turn the gate to the peg, hold still, then tap Capture.</div>
+    </div>
+    <div id="pegs"></div>
+    <div class="card row"><span style="flex:1">Force zero <span class="dim">· hands off the gate</span></span><b class="num" id="fNow" style="font-size:24px">--</b><button id="btnZero" style="min-height:40px">Zero</button></div>
+    <div class="dim" id="calMsg"></div>
+  </div>
+  <div class="foot"><div class="row"><button class="pri big" id="btnCap" style="flex:2">Capture</button><button class="big" data-go="ready" style="flex:1">Next</button></div></div>
+</section>
+
+<!-- READY -->
+<section class="scr" id="s-ready">
+  <div class="top"><button class="back" data-go="cal" aria-label="Back"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M15 5l-7 7 7 7"/></svg></button><h1>Ready to row</h1></div>
+  <div class="steps" data-step="4"></div>
+  <div class="body">
+    <div class="card" id="checks" style="padding:2px 14px"></div>
+    <div class="card dim">Recording saves to the phone as you go. Screen stays on. If anything closes the app, reopen it and tap Resume: the gap is marked.</div>
+  </div>
+  <div class="foot"><button class="go big" id="btnStart" style="min-height:72px;font-size:22px">Start session</button></div>
+</section>
+
+<!-- COX -->
+<section class="scr" id="s-cox" style="overflow:hidden">
+  <div class="strip"><span class="rec"><i></i>REC</span><span class="num" id="vElapsed" style="font-size:22px">0:00</span><span style="flex:1"></span><button id="btnAddCox" style="min-height:36px;font-size:13px;display:none">+ Gate</button><span class="dim" id="vGps">GPS…</span><div class="row" id="gDots" style="gap:8px"></div></div>
+  <div class="banner bwarn" id="warnBar"></div>
+  <div class="banner bdrill" id="drillBar"></div>
+  <div class="cox">
+    <div class="panels" id="livePanels">
+      <div class="panel"><span class="l">SPLIT /500 m</span><span class="num" id="vSplit">--</span><span class="dim" style="margin-top:8px"><b class="num" id="vDist" style="font-size:24px;color:var(--ink)">0</b> m</span></div>
+      <div class="panel"><span class="l">RATE</span><span class="num" id="vRate">--</span><span class="dim"><b class="num" id="vStk" style="font-size:24px;color:var(--ink)">0</b> strokes</span></div>
+    </div>
+    <div class="panels" id="drillPanels" style="display:none">
+      <div class="panel dpanel"><span class="l" style="color:var(--drill)" id="vDrillLbl">DRILL · STROKES</span><span class="num" id="vDrillN">0</span></div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <div class="panel" style="flex:1"><span class="l">SPLIT</span><span class="num" id="vSplit2" style="font-size:48px">--</span></div>
+        <div class="panel" style="flex:1"><span class="l">RATE</span><span class="num" id="vRate2" style="font-size:48px">--</span></div>
+      </div>
+    </div>
+    <div class="side" id="liveSide">
+      <button class="drillbtn" id="btnDrill">Start drill</button>
+      <button id="btnRower" style="min-height:56px">Change rower</button>
+      <button id="btnEnd" style="min-height:56px;color:var(--badt)">End session</button>
+    </div>
+    <div class="side" id="drillSide" style="display:none">
+      <button class="stopbtn" id="btnStopDrill">Stop drill</button>
+    </div>
+  </div>
+  <div class="row" id="drillNames" style="display:none;padding:0 14px 10px;overflow-x:auto"></div>
+</section>
+
+<!-- END -->
+<section class="scr" id="s-end">
+  <div style="padding:26px 20px 8px;text-align:center">
+    <h1 style="margin:0;font-size:26px">Session saved</h1>
+    <div class="dim" id="endSub"></div>
+  </div>
+  <div class="body">
+    <div class="grid2" id="endStats"></div>
+    <div><div class="dim" style="margin-bottom:6px">Timeline · drills orange · rower changes blue · gaps striped</div><div class="tl" id="endTl"></div></div>
+    <div id="endDrills"></div>
+  </div>
+  <div class="foot">
+    <div class="row"><button class="pri" id="btnExportEnd" style="flex:1">Export file</button><button data-go="home" style="flex:1">Done</button></div>
+    <div class="dim" style="text-align:center">Upload to the analysis site comes later. Sessions stay on the phone until then.</div>
+  </div>
+</section>
+
+<!-- MODALS -->
+<div class="modal" id="m-rower"><div class="box">
+  <div class="row" style="justify-content:space-between"><b style="font-size:18px">Change rower</b><span class="pill p-b">still recording</span></div>
+  <div class="dim">1. Which seat?</div>
+  <div class="grid4" id="mrSeats"></div>
+  <div class="dim">2. Pick a name used today, or type one</div>
+  <div class="row" id="mrRecent" style="flex-wrap:wrap"></div>
+  <input id="mrName" placeholder="Type name" aria-label="New rower name">
+  <div class="row"><button id="mrCancel" style="flex:1">Cancel</button><button class="pri" id="mrSave" style="flex:2">Swap rower</button></div>
+</div></div>
+<div class="modal" id="m-confirm"><div class="box">
+  <b style="font-size:18px" id="mcTitle"></b><div class="dim" id="mcText"></div>
+  <div class="row"><button id="mcNo" style="flex:1">Cancel</button><button class="pri" id="mcYes" style="flex:1">OK</button></div>
+</div></div>
+<div id="toast" role="status"></div>
+
+<script>
+"use strict";
+const VERSION = "v1.0 · 27 Nov 22:40";
+// ================= constants =================
+const SVC_CTRL = "85920000-0338-4b83-ae4a-ac1d217adb03", CTRL_REPLY = "85920100-0338-4b83-ae4a-ac1d217adb03", CTRL_CMD = "85920200-0338-4b83-ae4a-ac1d217adb03";
+const SVC_DATA = "12630000-dd25-497d-9854-9b6c02c77054", DATA1 = "12630001-dd25-497d-9854-9b6c02c77054";
+// Seats are numbered from the bow: 1 = Bow, N = Stroke (N = boat size)
+const SIZES = [2, 4, 8];
+const N = () => S.size || 4;
+const seatLabel = n => n === N() ? "Stroke" : n === 1 ? "Bow" : String(n);
+const seatShort = n => n === N() ? "S" : n === 1 ? "B" : String(n);
+const defaultSide = n => ((N() - n) % 2 === 0 ? "stroke" : "bow"); // standard rig; change per gate for tandem rigs
+const PEGS = [["B", -59], ["D", -19], ["C", 17], ["A", 61]];
+const DEFAULT_CAL = [[19994, -59], [8051, -19], [-9911, 17], [-20111, 61]]; // 1103748, 23 Nov
+const DRILLS = ["Pause drill", "Legs only", "Square blades", "Feet out", "Rate build"];
+const HYST = 5, MIN_LEN = 25;
+const $ = id => document.getElementById(id);
+const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => "&#" + c.charCodeAt(0) + ";");
+function hex(s) { s = s.replace(/[^0-9a-f]/gi, ""); const a = new Uint8Array(s.length >> 1); for (let i = 0; i < a.length; i++) a[i] = parseInt(s.substr(i * 2, 2), 16); return a; }
+function crc(b) { let c = 0xFFFF; for (const x of b) { c ^= x; for (let i = 0; i < 8; i++) c = (c & 1) ? (c >>> 1) ^ 0x8408 : c >>> 1; } return (c ^ 0xFFFF) & 0xFFFF; }
+function frame(type, p) { const body = [type & 255, type >> 8, p.length & 255, p.length >> 8, ...p], c = crc(body); body.push(c & 255, c >> 8); const o = [0x7E]; for (const b of body) { if (b === 0x7E || b === 0x7D) o.push(0x7D, b ^ 0x20); else o.push(b); } o.push(0x7E); return new Uint8Array(o); }
+// Same command as Oarlock Live (field table verified 27 Nov)
+const START_PAYLOAD = hex("6300" + "0d00" + "31002b000200" + "32002b000200" + "220028000200" + "23002d000200" + "25002b000200" + "26002e000100" + "27002e000100" + "280028000200" + "29002e000100" + "2a002e000100" + "2b002e000100" + "33002e000100" + "34002e000100");
+const serialOf = n => { const m = (n || "").match(/(\d{6,})/); return m ? m[1] : (n || "?"); };
+function toast(t) { const e = $("toast"); e.textContent = t; e.classList.add("on"); clearTimeout(e._t); e._t = setTimeout(() => e.classList.remove("on"), 2600); }
+function ask(title, text, yes) { return new Promise(r => { $("mcTitle").textContent = title; $("mcText").textContent = text; $("mcYes").textContent = yes || "OK"; $("m-confirm").classList.add("on"); $("mcYes").onclick = () => { $("m-confirm").classList.remove("on"); r(true); }; $("mcNo").onclick = () => { $("m-confirm").classList.remove("on"); r(false); }; }); }
+
+// ================= settings (localStorage, stable keys) =================
+// boat.settings : {size, names:{seat:name}, recent:[], rig:{boat,oar,inb,seats:{seat:{h,s,p}}}, lastRig, assign:{serial:{seat,side}}}
+// oarlockCal:<serial> : [[raw,deg],...]   (shared with Oarlock Live)
+// oarlockZero:<serial> : number
+let S = { size: 4, names: {}, recent: [], rig: { boat: "", oar: "", inb: "", seats: {} }, lastRig: null, assign: {} };
+try { const s = JSON.parse(localStorage.getItem("boat.settings") || "null"); if (s) S = Object.assign(S, s); } catch (e) {}
+if (Array.isArray(S.names)) S.names = {}; if (Array.isArray(S.rig.seats)) S.rig.seats = {};
+function saveS() { try { localStorage.setItem("boat.settings", JSON.stringify(S)); } catch (e) {} }
+function lsGet(k) { try { return JSON.parse(localStorage.getItem(k) || "null"); } catch (e) { return null; } }
+function lsSet(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist().then(p => { $("storeTxt").textContent = p ? "storage: permanent" : ""; }); } catch (e) {}
+
+// ================= calibration curve =================
+function makeCurve(points) {
+  const pts = points.slice().sort((a, b) => a[0] - b[0]), xs = pts.map(p => p[0]), ys = pts.map(p => p[1]), n = xs.length, h = [], d = [];
+  for (let i = 0; i < n - 1; i++) { h.push(xs[i + 1] - xs[i]); d.push((ys[i + 1] - ys[i]) / h[i]); }
+  const m = new Array(n).fill(0); m[0] = d[0]; m[n - 1] = d[n - 2];
+  for (let i = 1; i < n - 1; i++) { if (d[i - 1] * d[i] <= 0) m[i] = 0; else { const w1 = 2 * h[i] + h[i - 1], w2 = h[i] + 2 * h[i - 1]; m[i] = (w1 + w2) / (w1 / d[i - 1] + w2 / d[i]); } }
+  return r => { if (r <= xs[0]) return ys[0] + d[0] * (r - xs[0]); if (r >= xs[n - 1]) return ys[n - 1] + d[n - 2] * (r - xs[n - 1]);
+    let i = 0; while (i < n - 2 && xs[i + 1] <= r) i++; const t = (r - xs[i]) / h[i], t2 = t * t, t3 = t2 * t;
+    return (2*t3 - 3*t2 + 1) * ys[i] + (t3 - 2*t2 + t) * h[i] * m[i] + (-2*t3 + 3*t2) * ys[i+1] + (t3 - t2) * h[i] * m[i+1]; };
+}
+function calOf(ser) { const c = lsGet("oarlockCal:" + ser); return c && c.length >= 2 ? { pts: c, own: true } : (ser === "1103748" && lsGet("oarlockCal")) ? { pts: lsGet("oarlockCal"), own: true } : { pts: DEFAULT_CAL, own: false }; }
+
+// ================= gates =================
+// gate: {ser, name, dev, seat, side, conn, sim, curve, calOwn, zero, angle, force, raw, last, st(stroke det), samples[]}
+const gates = [];
+const gateOnSeat = s => gates.find(g => g.seat === s);
+function newGate(name, dev, sim) {
+  const ser = serialOf(name), a = S.assign[ser];
+  const used = gates.map(g => g.seat), free = [...Array(N())].map((_, i) => N() - i).filter(x => !used.includes(x));
+  let seat = a && a.seat <= N() && !used.includes(a.seat) ? a.seat : free[0]; if (seat === undefined) seat = N();
+  const c = calOf(ser), g = { ser, name, dev, sim, seat, side: a && a.seat === seat ? a.side : defaultSide(seat), conn: false, curve: makeCurve(c.pts), calOwn: c.own, zero: lsGet("oarlockZero:" + ser) || 0,
+    angle: null, force: null, raw: null, last: 0, st: { mode: "catch", ext: null, extT: 0, catchT: null, catchA: null, finA: null }, strokes: 0, lastCycle: 0, lastCatchT: 0, rs: [] };
+  gates.push(g); S.assign[ser] = { seat: g.seat, side: g.side }; saveS(); return g;
+}
+function onData(g, clock, force, raw, vel) {
+  const t = Date.now(); g.last = t; g.raw = raw; g.force = force - g.zero; g.angle = g.curve(raw);
+  g.rs.push([raw, force]); if (g.rs.length > 60) g.rs.shift();
+  if (rec.on) rec.push([t - rec.t0, g.seat, clock, force, raw, vel]);
+  feed(g, t, g.angle);
+}
+function feed(g, t, a) {
+  const st = g.st;
+  if (st.ext === null) { st.ext = a; st.extT = t; return; }
+  if (st.mode === "catch") {
+    if (a < st.ext) { st.ext = a; st.extT = t; }
+    else if (a > st.ext + HYST) {
+      if (st.catchT !== null && st.finA !== null && st.finA - st.catchA >= MIN_LEN) {
+        const cyc = (st.extT - st.catchT) / 1000;
+        if (cyc > 1 && cyc < 10) { g.lastCycle = cyc; g.lastCatchT = st.extT; }
+        g.strokes++; onStroke(g, st.catchT);
+      }
+      st.catchA = st.ext; st.catchT = st.extT; st.mode = "finish"; st.ext = a; st.extT = t;
+    }
+  } else {
+    if (a > st.ext) { st.ext = a; st.extT = t; }
+    else if (a < st.ext - HYST) { st.finA = st.ext; st.mode = "catch"; st.ext = a; st.extT = t; }
+  }
+}
+function refGate() { return gates.filter(g => g.conn).sort((a, b) => b.seat - a.seat)[0] || null; }
+function onStroke(g, catchT) { if (g === refGate() && rec.on) { rec.meta.strokes = (rec.meta.strokes || 0) + 1; if (drill.on && catchT >= drill.start) drill.n++; } }
+
+async function addGate() {
+  if (!navigator.bluetooth) { toast("No Bluetooth here: use Chrome on the Samsung"); return; }
+  try {
+    const dev = await navigator.bluetooth.requestDevice({ filters: [{ namePrefix: "EmPower" }], optionalServices: [SVC_CTRL, SVC_DATA, "battery_service"] });
+    let g = gates.find(x => x.name === dev.name);
+    if (!g) g = newGate(dev.name, dev, false); else g.dev = dev;
+    await connectGate(g); renderGates();
+  } catch (e) { if (e.name !== "NotFoundError") toast("Add failed: " + e.message); }
+}
+async function connectGate(g) {
+  const dev = g.dev; if (!dev) return false;
+  if (!dev._hooked) { dev._hooked = true; dev.addEventListener("gattserverdisconnected", () => { g.conn = false; logEv({ type: "disconnect", seat: g.seat, ser: g.ser }); renderGates(); setTimeout(() => reconnect(g), 1500); }); }
+  try {
+    const sv = await dev.gatt.connect(), data = await sv.getPrimaryService(SVC_DATA), ctrl = await sv.getPrimaryService(SVC_CTRL);
+    const d1 = await data.getCharacteristic(DATA1);
+    if (!d1._hooked) { d1._hooked = true; d1.addEventListener("characteristicvaluechanged", ev => { const v = ev.target.value; if (v.byteLength >= 10) onData(g, v.getUint16(0, true), v.getInt16(2, true), v.getInt16(6, true), v.getInt16(8, true)); }); }
+    await d1.startNotifications();
+    try { await (await ctrl.getCharacteristic(CTRL_REPLY)).startNotifications(); } catch (e) {}
+    try { const bs = await sv.getPrimaryService("battery_service"); g.bat = (await (await bs.getCharacteristic("battery_level")).readValue()).getUint8(0); } catch (e) {}
+    const cmd = await ctrl.getCharacteristic(CTRL_CMD), f = frame(0, START_PAYLOAD);
+    for (let i = 0; i < f.length; i += 20) { const ck = f.slice(i, i + 20); if (cmd.writeValueWithResponse) await cmd.writeValueWithResponse(ck); else await cmd.writeValue(ck); }
+    g.conn = true; logEv({ type: "connect", seat: g.seat, ser: g.ser }); return true;
+  } catch (e) { g.conn = false; return false; }
+}
+async function reconnect(g) { if (g.conn || g.sim || !g.dev) return; for (let i = 0; i < 5 && !g.conn; i++) { if (await connectGate(g)) { toast(seatLabel(g.seat) + " gate reconnected"); renderGates(); return; } await new Promise(r => setTimeout(r, 2000)); } }
+async function restoreDevices() {
+  if (!navigator.bluetooth || !navigator.bluetooth.getDevices) return;
+  try { for (const dev of await navigator.bluetooth.getDevices()) { if (!/EmPower/.test(dev.name || "")) continue; let g = gates.find(x => x.name === dev.name); if (!g) g = newGate(dev.name, dev, false); else g.dev = dev; connectGate(g).then(renderGates); } } catch (e) {}
+}
+
+// simulator (for trying the flow without gates)
+let simTimer = null;
+function startSim() {
+  if (simTimer) return;
+  ["EmPowerSIM9000001", "EmPowerSIM9000002", "EmPowerSIM9000003", "EmPowerSIM9000004"].slice(0, Math.min(4, N())).forEach(n => { if (!gates.find(g => g.name === n)) { const g = newGate(n, null, true); g.conn = true; g.bat = 80 + Math.floor(Math.random() * 15); } });
+  const inv = makeCurve(DEFAULT_CAL.map(p => [p[1], p[0]])), t0 = Date.now(); let clk = 0;
+  simTimer = setInterval(() => {
+    const t = (Date.now() - t0) / 1000, rate = drill.on ? 18 : 24, T = 60 / rate; clk = (clk + 50) & 0xFFFF;
+    gates.filter(g => g.sim).forEach((g, i) => {
+      const ph = ((t - [0, .012, -.008, .02][i] + 100 * T) % T) / T, dr = .42, c = -57 + i, f = 34 - i * .5;
+      const deg = ph < dr ? c + (f - c) * (1 - Math.cos(Math.PI * ph / dr)) / 2 : f - (f - c) * (1 - Math.cos(Math.PI * (ph - dr) / (1 - dr))) / 2;
+      const fo = ph < dr && ph / dr > .05 && ph / dr < .95 ? 3000 * Math.pow(Math.sin(Math.PI * (ph / dr - .05) / .9), 1.4) : 0;
+      onData(g, clk, Math.round(fo + (Math.random() - .5) * 8), Math.round(inv(deg) + (Math.random() - .5) * 20), 0);
+    });
+  }, 50);
+  renderGates();
+}
+
+// ================= recording (IndexedDB) =================
+let db = null;
+function openDb() { return new Promise((res, rej) => { const r = indexedDB.open("boatRecorder", 1); r.onupgradeneeded = () => { const d = r.result; d.createObjectStore("sessions", { keyPath: "id" }); const c = d.createObjectStore("chunks", { autoIncrement: true }); c.createIndex("sid", "sid"); }; r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); }
+function tx(store, mode, fn) { return new Promise((res, rej) => { const t = db.transaction(store, mode), s = t.objectStore(store); const out = fn(s); t.oncomplete = () => res(out && out.result); t.onerror = () => rej(t.error); }); }
+const rec = { on: false, id: null, t0: 0, meta: null, buf: [], gps: [], ev: [], seq: 0, push(p) { this.buf.push(p); } };
+function logEv(e) { if (!rec.on) return; e.t = Date.now() - rec.t0; rec.ev.push(e); rec.meta.events = rec.meta.events || []; rec.meta.events.push(e); }
+async function flush() {
+  if (!rec.on || !db) return;
+  const chunk = { sid: rec.id, seq: rec.seq++, p: rec.buf.splice(0), g: rec.gps.splice(0), e: rec.ev.splice(0) };
+  rec.meta.lastT = Date.now() - rec.t0; rec.meta.dist = Math.round(gps.dist); rec.meta.seqNext = rec.seq;
+  try { await tx("chunks", "readwrite", s => s.add(chunk)); await tx("sessions", "readwrite", s => s.put(rec.meta)); } catch (e) { toast("Save error: " + e.message); }
+}
+setInterval(flush, 2000);
+
+async function startSession(resumeMeta) {
+  try { await document.documentElement.requestFullscreen(); await screen.orientation.lock("landscape"); } catch (e) {}
+  if (resumeMeta) {
+    rec.id = resumeMeta.id; rec.t0 = resumeMeta.start; rec.meta = resumeMeta; rec.seq = resumeMeta.seqNext || 0;
+    rec.on = true; logEv({ type: "resume" }); gps.dist = resumeMeta.dist || 0;
+    if (resumeMeta.names && !Array.isArray(resumeMeta.names)) S.names = Object.assign({}, resumeMeta.names); if (resumeMeta.boatSize) S.size = resumeMeta.boatSize;
+  } else {
+    rec.id = "s" + Date.now(); rec.t0 = Date.now(); rec.seq = 0; gps.dist = 0;
+    rec.meta = { id: rec.id, start: rec.t0, status: "recording", version: VERSION, boat: S.rig.boat, boatSize: N(), seatNumbering: "1 = bow", rig: JSON.parse(JSON.stringify(S.rig)), names: Object.assign({}, S.names),
+      gates: gates.map(g => ({ ser: g.ser, seat: g.seat, side: g.side, cal: calOf(g.ser).pts, zero: g.zero, sim: !!g.sim })), events: [], strokes: 0, drills: 0 };
+    rec.on = true; S.lastRig = JSON.parse(JSON.stringify(S.rig)); saveS();
+    gates.forEach(g => { const n = S.names[g.seat]; if (n) logEv({ type: "rower", seat: g.seat, name: n }); });
+  }
+  await flush(); startGps(); keepAwake(); go("cox");
+}
+async function endSession() {
+  if (!(await ask("End session?", "Recording stops and the session is saved on this phone.", "End session"))) return;
+  if (drill.on) stopDrill(); logEv({ type: "end" }); rec.meta.status = "saved"; rec.meta.end = Date.now(); await flush(); rec.on = false;
+  try { screen.orientation.unlock(); } catch (e) {} try { if (document.fullscreenElement) await document.exitFullscreen(); } catch (e) {}
+  showEnd(rec.meta); go("end"); loadSessions();
+}
+
+// ================= GPS =================
+const gps = { watch: null, last: null, dist: 0, speed: 0, acc: null, fixT: 0 };
+function startGps() {
+  if (gps.watch !== null || !navigator.geolocation) return;
+  gps.watch = navigator.geolocation.watchPosition(p => {
+    const c = p.coords, t = p.timestamp; gps.acc = c.accuracy; gps.fixT = Date.now();
+    if (rec.on) rec.gps.push([t - rec.t0, +c.latitude.toFixed(7), +c.longitude.toFixed(7), Math.round(c.accuracy), c.speed == null ? null : +c.speed.toFixed(2), c.heading == null ? null : Math.round(c.heading)]);
+    if (gps.last && c.accuracy < 25) {
+      const d = hav(gps.last.lat, gps.last.lon, c.latitude, c.longitude), dt = (t - gps.last.t) / 1000;
+      if (dt > 0 && d / dt < 9) { if (rec.on) gps.dist += d; const v = c.speed != null && c.speed >= 0 ? c.speed : d / dt; gps.speed = gps.speed ? gps.speed * .7 + v * .3 : v; }
+    }
+    if (c.accuracy < 25) gps.last = { lat: c.latitude, lon: c.longitude, t };
+  }, () => {}, { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 });
+}
+function hav(a, b, c, d) { const R = 6371000, r = Math.PI / 180, x = Math.sin((c - a) * r / 2) ** 2 + Math.cos(a * r) * Math.cos(c * r) * Math.sin((d - b) * r / 2) ** 2; return 2 * R * Math.asin(Math.sqrt(x)); }
+const fmtSplit = v => { if (!v || v < .7 || Date.now() - gps.fixT > 6000) return "--"; const s = 500 / v; return Math.floor(s / 60) + ":" + (s % 60).toFixed(1).padStart(4, "0"); };
+
+// ================= screen awake + resume =================
+let wake = null;
+async function keepAwake() { try { if (navigator.wakeLock && document.visibilityState === "visible") { wake = await navigator.wakeLock.request("screen"); } } catch (e) {} }
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") { logEv({ type: "hidden" }); flush(); }
+  else { logEv({ type: "visible" }); if (rec.on) keepAwake(); gates.forEach(g => { if (!g.conn) reconnect(g); }); }
+});
+window.addEventListener("pagehide", () => { logEv({ type: "hidden" }); flush(); });
+
+// ================= drills + rowers =================
+const drill = { on: false, n: 0, num: 0, start: 0, name: "" };
+function startDrill() { drill.on = true; drill.n = 0; drill.num = (rec.meta.drills || 0) + 1; rec.meta.drills = drill.num; drill.name = ""; drill.start = Date.now(); logEv({ type: "drill_start", n: drill.num }); renderCoxMode(); }
+function stopDrill() {
+  if (Date.now() - drill.start < 5000) { logEv({ type: "drill_cancel", n: drill.num }); rec.meta.drills = drill.num - 1; drill.on = false; renderCoxMode(); toast("Drill cancelled (stopped within 5 s)"); return; }
+  logEv({ type: "drill_end", n: drill.num, strokes: drill.n, name: drill.name }); drill.on = false; renderCoxMode(); toast("Drill " + drill.num + " saved: " + drill.n + " strokes");
+}
+function nameDrill(n) { drill.name = n; logEv({ type: "drill_name", n: drill.num, name: n }); renderCoxMode(); }
+let mrSeat = 0;
+const gateSeats = () => gates.map(g => g.seat).sort((a, b) => b - a);
+function openRower() { mrSeat = gateSeats()[0] || N(); $("mrName").value = ""; renderRowerModal(); $("m-rower").classList.add("on"); }
+function renderRowerModal() {
+  $("mrSeats").innerHTML = gateSeats().map(i => `<button class="${i === mrSeat ? "pri" : ""}" data-mrs="${i}" style="min-height:58px;display:flex;flex-direction:column;align-items:center;justify-content:center;line-height:1.2"><b>${seatLabel(i)}</b><span style="font-size:12px;font-weight:500">${esc(S.names[i] || "—")}</span></button>`).join("");
+  $("mrRecent").innerHTML = S.recent.filter(n => !Object.values(S.names).includes(n)).slice(0, 8).map(n => `<button class="chip" data-mrn="${esc(n)}">${esc(n)}</button>`).join("") || '<span class="dim">No other names yet</span>';
+}
+function saveRower(name) { name = (name || "").trim().slice(0, 40); if (!name) { toast("Type or pick a name"); return; } S.names[mrSeat] = name; addRecent(name); saveS(); logEv({ type: "rower", seat: mrSeat, name }); rec.meta.names = Object.assign({}, S.names); $("m-rower").classList.remove("on"); toast(seatLabel(mrSeat) + " seat: " + name + " from now"); renderGateDots(); }
+function addRecent(n) { if (!n) return; S.recent = [n, ...S.recent.filter(x => x !== n)].slice(0, 20); }
+
+// ================= rendering =================
+let cur = "home";
+function go(s) { cur = s; document.querySelectorAll(".scr").forEach(e => e.classList.toggle("on", e.id === "s-" + s)); if (s === "home") loadSessions(); if (s === "connect") renderGates(); if (s === "rig") renderRig(); if (s === "cal") renderCal(); if (s === "ready") renderReady(); if (s === "cox") { renderGateDots(); renderCoxMode(); } }
+document.addEventListener("click", e => { const b = e.target.closest("[data-go]"); if (b) { if (cur === "rig") readRig(); go(b.dataset.go); } });
+document.querySelectorAll(".steps").forEach(el => { const n = +el.dataset.step; el.innerHTML = ["Connect", "Rig", "Calibrate", "Start"].map((s, i) => `<div class="${i < n ? "done" : ""} ${i === n - 1 ? "cur" : ""}"><i></i>${s}</div>`).join(""); });
+
+function renderGates() {
+  if (cur !== "connect") return;
+  $("sizeSel").innerHTML = SIZES.map(n => `<button data-size="${n}" class="${n === N() ? "pri" : ""}" style="flex:1">${n === 2 ? "Pair (2)" : n === 4 ? "Four (4)" : "Eight (8)"}</button>`).join("");
+  const seatOpts = cur => [...Array(N())].map((_, i) => N() - i).map(n => `<option value="${n}" ${n === cur ? "selected" : ""}>${seatLabel(n)}${n !== 1 && n !== N() ? " seat" : ""}</option>`).join("");
+  const list = gates.slice().sort((a, b) => b.seat - a.seat).map(g => {
+    const pill = g.conn ? '<span class="pill p-ok">Connected</span>' : '<span class="pill p-w">Reconnecting…</span>';
+    return `<div class="card" style="display:flex;flex-direction:column;gap:8px;margin-bottom:8px">
+      <div class="row"><span class="dim" style="flex:1">Gate ${esc(g.ser)}${g.bat != null ? " · battery " + g.bat + "%" : ""}${g.sim ? " · simulated" : ""}</span>${pill}</div>
+      <div class="row"><select data-seatsel="${esc(g.ser)}" aria-label="Seat for gate ${esc(g.ser)}" style="flex:1">${seatOpts(g.seat)}</select>
+      <select data-sidesel="${esc(g.ser)}" aria-label="Side for gate ${esc(g.ser)}" style="flex:1"><option value="stroke" ${g.side === "stroke" ? "selected" : ""}>Stroke side</option><option value="bow" ${g.side === "bow" ? "selected" : ""}>Bow side</option></select></div>
+      <label class="row" style="font-size:13px;font-weight:600;color:var(--dim)">Rower<input data-name="${g.seat}" value="${esc(S.names[g.seat] || "")}" placeholder="Type rower name" style="flex:1"></label></div>`;
+  });
+  $("gateList").innerHTML = list.join("") + (gates.length < 4 ? `<div class="card dim" style="margin-bottom:8px">${4 - gates.length} more gate${gates.length === 3 ? "" : "s"} to add</div>` : "");
+}
+$("gateList").addEventListener("input", e => { const i = e.target.dataset.name; if (i != null) { S.names[+i] = e.target.value.slice(0, 40); saveS(); } });
+$("gateList").addEventListener("change", e => {
+  const ss = e.target.dataset.seatsel, sd = e.target.dataset.sidesel;
+  if (e.target.dataset.name != null) addRecent(e.target.value.trim()), saveS();
+  if (ss) { const g = gates.find(x => x.ser === ss), ns = +e.target.value, o = gateOnSeat(ns); if (o && o !== g) { o.seat = g.seat; S.assign[o.ser] = { seat: o.seat, side: o.side }; } g.seat = ns; g.side = defaultSide(ns); S.assign[g.ser] = { seat: g.seat, side: g.side }; saveS(); renderGates(); }
+  if (sd) { const g = gates.find(x => x.ser === sd); g.side = e.target.value; S.assign[g.ser] = { seat: g.seat, side: g.side }; saveS(); }
+});
+$("sizeSel").onclick = e => { const b = e.target.closest("[data-size]"); if (!b) return; S.size = +b.dataset.size; gates.forEach(g => { if (g.seat > N()) g.seat = N(); }); saveS(); renderGates(); };
+$("btnAdd").onclick = addGate; $("btnSim").onclick = startSim;
+
+function renderRig() {
+  const r = S.rig; $("rBoat").value = r.boat || ""; $("rOar").value = r.oar || ""; $("rIn").value = r.inb || "";
+  $("rigRows").innerHTML = (gates.length ? gateSeats() : [...Array(N())].map((_, i) => N() - i)).map(i => { const s = seatLabel(i), x = (r.seats && r.seats[i]) || {}; return `<div style="display:grid;grid-template-columns:64px repeat(3,minmax(0,1fr));gap:6px;align-items:center"><b style="font-size:14px">${s}</b>${["h", "s", "p"].map(k => `<input data-rig="${i}.${k}" value="${esc(x[k] || "")}" inputmode="decimal" aria-label="${s} ${k}" style="text-align:center">`).join("")}</div>`; }).join("");
+}
+function readRig() {
+  const r = S.rig; r.boat = $("rBoat").value.trim(); r.oar = $("rOar").value.trim(); r.inb = $("rIn").value.trim(); r.seats = r.seats || {};
+  document.querySelectorAll("[data-rig]").forEach(el => { const [i, k] = el.dataset.rig.split("."); r.seats[+i] = r.seats[+i] || {}; r.seats[+i][k] = el.value.trim(); }); saveS();
+}
+$("btnCopyRig").onclick = () => { if (!S.lastRig) { toast("No saved rig yet"); return; } S.rig = JSON.parse(JSON.stringify(S.lastRig)); renderRig(); toast("Last rig copied"); };
+
+// calibration
+let calSeat = 0, calPegs = [], capturing = false;
+function renderCal() {
+  if (!gateOnSeat(calSeat)) calSeat = gateSeats()[0] || 0;
+  $("calTabs").innerHTML = gateSeats().map(i => { const g = gateOnSeat(i), ok = calOf(g.ser).own; return `<button data-cs="${i}" class="${i === calSeat ? "pri" : ""}" style="${ok && i !== calSeat ? "background:#17351f;color:var(--ok)" : ""}">${ok ? "✓ " : ""}${seatLabel(i)}</button>`; }).join("") || '<span class="dim">Add gates first</span>';
+  const g = gateOnSeat(calSeat);
+  $("calWho").textContent = g ? `${seatLabel(calSeat)} seat · gate ${g.ser}${g.calOwn ? " · calibrated" : " · not calibrated yet"}` : "No gate on this seat";
+  const nx = calPegs.length;
+  $("pegs").innerHTML = PEGS.map(([k, d], i) => `<div class="peg ${i < nx ? "done" : i === nx ? "cur" : ""}"><span class="k">${k}</span><b style="flex:1">Peg ${k} · ${d > 0 ? "+" : ""}${d}°</b><span class="dim">${i < nx ? "raw " + calPegs[i][0] : i === nx ? "next" : ""}</span></div>`).join("");
+  $("btnCap").textContent = nx < 4 ? "Capture peg " + PEGS[nx][0] : "Redo pegs";
+}
+$("calTabs").onclick = e => { const b = e.target.closest("[data-cs]"); if (b) { calSeat = +b.dataset.cs; calPegs = []; $("calMsg").textContent = ""; renderCal(); } };
+$("btnCap").onclick = async () => {
+  const g = gateOnSeat(calSeat); if (!g || !g.conn) { toast("Gate not connected"); return; }
+  if (calPegs.length >= 4) { calPegs = []; renderCal(); return; }
+  if (capturing) return; capturing = true; $("btnCap").textContent = "Hold still…"; g.rs = [];
+  await new Promise(r => setTimeout(r, 1500)); capturing = false;
+  const s = g.rs.map(x => x[0]); if (s.length < 10) { $("calMsg").textContent = "No data from the gate. Check it's connected."; renderCal(); return; }
+  const mean = s.reduce((a, b) => a + b, 0) / s.length, sd = Math.sqrt(s.reduce((a, b) => a + (b - mean) ** 2, 0) / s.length);
+  if (sd > 60) { $("calMsg").textContent = `Peg ${PEGS[calPegs.length][0]}: it moved (wobble ${sd.toFixed(0)}). Hold still and try again.`; renderCal(); return; }
+  calPegs.push([Math.round(mean), PEGS[calPegs.length][1]]); $("calMsg").textContent = "";
+  if (calPegs.length === 4) {
+    const r = calPegs.map(p => p[0]), mono = r.every((x, i) => !i || x < r[i - 1]) || r.every((x, i) => !i || x > r[i - 1]);
+    if (!mono) { $("calMsg").textContent = "Pegs out of order. Start again from peg B."; calPegs = []; renderCal(); return; }
+    lsSet("oarlockCal:" + g.ser, calPegs); g.curve = makeCurve(calPegs); g.calOwn = true; toast(seatLabel(calSeat) + " calibrated (gate " + g.ser + ")");
+    const nextSeat = gateSeats().find(i => !calOf(gateOnSeat(i).ser).own); if (nextSeat !== undefined) { calSeat = nextSeat; calPegs = []; }
+  }
+  renderCal();
+};
+$("btnZero").onclick = async () => {
+  const g = gateOnSeat(calSeat); if (!g || !g.conn) { toast("Gate not connected"); return; }
+  g.rs = []; toast("Hands off the gate…"); await new Promise(r => setTimeout(r, 1500));
+  const f = g.rs.map(x => x[1]); if (f.length < 10) { toast("No data"); return; }
+  g.zero = Math.round(f.reduce((a, b) => a + b, 0) / f.length); lsSet("oarlockZero:" + g.ser, g.zero); toast("Force zero set: " + g.zero);
+};
+
+function renderReady() {
+  const conn = gates.filter(g => g.conn), calOk = gates.filter(g => calOf(g.ser).own), named = gates.filter(g => S.names[g.seat]), r = S.rig;
+  const items = [
+    [conn.length >= 4, `${conn.length} of 4 gates connected`, gates.map(g => `${seatLabel(g.seat)} ${g.bat != null ? g.bat + "%" : ""}`).join(" · ") || "Go back and add gates"],
+    [calOk.length >= gates.length && gates.length > 0, `${calOk.length} of ${gates.length} gates calibrated`, calOk.length < gates.length ? "Uncalibrated gates use a default, so angles are approximate" : "Saved per gate"],
+    [named.length >= gates.length && gates.length > 0, `${named.length} of ${gates.length} rowers named`, gateSeats().map(i => `${seatLabel(i)} ${S.names[i] || "—"}`).join(" · ")],
+    [!!(r.boat || r.oar || r.inb), "Rig recorded", [r.boat, r.oar && "oar " + r.oar, r.inb && "inboard " + r.inb].filter(Boolean).join(" · ") || "Optional, but helps the analysis"],
+    [gps.acc != null && gps.acc < 25, "GPS", gps.acc != null ? "Accurate to about " + Math.round(gps.acc) + " m" : "Waiting for a fix (can take a minute without data)"]
+  ];
+  $("checks").innerHTML = items.map(([ok, t, d]) => `<div class="check">${ok ? '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="#81c784" stroke-width="2.6"><path d="M5 12l5 5 9-10"/></svg>' : '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="#ffb74d" stroke-width="2.4"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg>'}<div><b>${esc(t)}</b><span class="dim">${esc(d)}</span></div></div>`).join("");
+  startGps();
+}
+$("btnStart").onclick = async () => { if (!gates.length) { if (!(await ask("No gates connected", "Start anyway? Only GPS split and rate from GPS will be recorded.", "Start"))) return; } startSession(); };
+
+// cox
+function renderGateDots() { $("gDots").innerHTML = gateSeats().map(i => { const g = gateOnSeat(i); return `<span class="gd ${g.conn && Date.now() - g.last < 3000 ? "" : "off"}"><i></i>${seatShort(i)}</span>`; }).join(""); }
+function renderCoxMode() {
+  const on = drill.on;
+  $("livePanels").style.display = on ? "none" : ""; $("drillPanels").style.display = on ? "" : "none";
+  $("liveSide").style.display = on ? "none" : ""; $("drillSide").style.display = on ? "" : "none";
+  $("drillNames").style.display = on ? "flex" : "none";
+  $("drillBar").classList.toggle("on", on); $("drillBar").textContent = on ? `DRILL ${drill.num} running${drill.name ? " · " + drill.name : ""}` : "";
+  $("vDrillLbl").textContent = `DRILL ${drill.num} · STROKES`;
+  $("drillNames").innerHTML = '<span class="dim" style="flex:none">Name it (optional)</span>' + DRILLS.map(n => `<button class="chip ${drill.name === n ? "on" : ""}" data-dn="${esc(n)}">${esc(n)}</button>`).join("");
+}
+$("btnAddCox").onclick = addGate;
+$("btnDrill").onclick = startDrill; $("btnStopDrill").onclick = stopDrill; $("btnEnd").onclick = endSession; $("btnRower").onclick = openRower;
+$("drillNames").onclick = e => { const b = e.target.closest("[data-dn]"); if (b) nameDrill(b.dataset.dn); };
+$("mrSeats").onclick = e => { const b = e.target.closest("[data-mrs]"); if (b) { mrSeat = +b.dataset.mrs; renderRowerModal(); } };
+$("mrRecent").onclick = e => { const b = e.target.closest("[data-mrn]"); if (b) saveRower(b.dataset.mrn); };
+$("mrSave").onclick = () => saveRower($("mrName").value); $("mrCancel").onclick = () => $("m-rower").classList.remove("on");
+
+setInterval(() => {
+  if (cur === "cox") {
+    const el = rec.on ? Date.now() - rec.t0 : 0, m = Math.floor(el / 60000), s = Math.floor(el / 1000) % 60, h = Math.floor(m / 60);
+    $("vElapsed").textContent = (h ? h + ":" + String(m % 60).padStart(2, "0") : m) + ":" + String(s).padStart(2, "0");
+    const g = refGate(), rate = g && g.lastCycle && Date.now() - g.lastCatchT < 8000 ? Math.round(60 / g.lastCycle) : null, sp = fmtSplit(gps.speed);
+    $("vSplit").textContent = sp; $("vSplit2").textContent = sp; $("vRate").textContent = rate || "--"; $("vRate2").textContent = rate || "--";
+    $("vDist").textContent = Math.round(gps.dist).toLocaleString(); $("vStk").textContent = rec.meta ? rec.meta.strokes || 0 : 0; $("vDrillN").textContent = drill.n;
+    $("vGps").textContent = gps.acc == null ? "GPS…" : Date.now() - gps.fixT > 6000 ? "GPS lost" : "GPS ±" + Math.round(gps.acc) + " m";
+    const off = gates.filter(g => !g.conn || Date.now() - g.last > 3000);
+    $("warnBar").classList.toggle("on", off.length > 0 && gates.length > 0);
+    $("warnBar").textContent = off.length ? off.map(g => seatLabel(g.seat)).join(", ") + " gate not sending · reconnecting (still recording the others)" : "";
+    renderGateDots();
+    $("btnAddCox").style.display = gates.filter(g => g.conn).length < 4 && navigator.bluetooth ? "" : "none";
+  }
+  if (cur === "cal") { const g = gateOnSeat(calSeat); $("calDeg").textContent = g && g.angle != null && Date.now() - g.last < 2000 ? (g.angle > 0 ? "+" : "") + g.angle.toFixed(1) + "°" : "--"; $("fNow").textContent = g && g.force != null ? g.force : "--"; }
+  if (cur === "connect" && Math.random() < .2 && !$("gateList").contains(document.activeElement)) renderGates();
+}, 200);
+
+// ================= sessions list, export, end screen =================
+async function allSessions() { if (!db) return []; return (await tx("sessions", "readonly", s => s.getAll())) || []; }
+async function loadSessions() {
+  const ss = (await allSessions()).sort((a, b) => b.start - a.start), live = ss.find(s => s.status === "recording" && s.id !== rec.id);
+  $("resumeCard").style.display = live && !rec.on ? "" : "none";
+  if (live) { $("resumeTxt").textContent = `Started ${new Date(live.start).toLocaleString("en-NZ", { weekday: "short", hour: "2-digit", minute: "2-digit" })} · ${live.strokes || 0} strokes`; $("btnResume").onclick = () => startSession(live);
+    $("btnEndOld").onclick = async () => { if (!(await ask("End that session?", "It is saved as it is. Nothing is deleted.", "End it"))) return; live.status = "saved"; live.end = live.start + (live.lastT || 0); await tx("sessions", "readwrite", s => s.put(live)); loadSessions(); }; }
+  $("sessList").innerHTML = ss.filter(s => s.status === "saved").map(s => { const d = new Date(s.start), dur = Math.round(((s.end || s.start + (s.lastT || 0)) - s.start) / 60000);
+    return `<div class="card" style="margin-bottom:8px"><div class="row" style="justify-content:space-between"><b>${d.toLocaleDateString("en-NZ", { weekday: "short", day: "numeric", month: "short" })} ${d.toLocaleTimeString("en-NZ", { hour: "2-digit", minute: "2-digit" })}${s.boat ? " · " + esc(s.boat) : ""}</b><span class="pill p-w">On phone</span></div>
+    <div class="dim">${dur} min · ${((s.dist || 0) / 1000).toFixed(1)} km · ${s.strokes || 0} strokes · ${s.drills || 0} drills</div><button data-exp="${esc(s.id)}" style="width:100%;margin-top:8px">Export file</button></div>`; }).join("") || '<div class="dim">None yet.</div>';
+}
+$("sessList").onclick = e => { const b = e.target.closest("[data-exp]"); if (b) exportSession(b.dataset.exp); };
+async function exportSession(id) {
+  const meta = (await allSessions()).find(s => s.id === id); if (!meta) return;
+  const chunks = (await tx("chunks", "readonly", s => s.index("sid").getAll(id))) || []; chunks.sort((a, b) => a.seq - b.seq);
+  const out = { format: "cbhs-boat-recorder/1", meta, packetFields: ["t_ms", "seat", "clock", "force_raw", "angle_raw", "ang_vel"], gpsFields: ["t_ms", "lat", "lon", "acc_m", "speed_ms", "heading"],
+    packets: [].concat(...chunks.map(c => c.p)), gps: [].concat(...chunks.map(c => c.g)), events: [].concat(...chunks.map(c => c.e)) };
+  const a = document.createElement("a"), d = new Date(meta.start);
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(out)], { type: "application/json" }));
+  a.download = `session-${d.toISOString().slice(0, 16).replace(/[:T]/g, "")}${meta.boat ? "-" + meta.boat.replace(/\W+/g, "") : ""}.json`; a.click();
+  toast(`Exported ${out.packets.length.toLocaleString()} packets`);
+}
+function showEnd(m) {
+  const dur = (m.end - m.start) / 1000, mm = Math.floor(dur / 60), ss = Math.floor(dur % 60), evs = m.events || [];
+  $("endSub").textContent = "On this phone" + (m.boat ? " · " + m.boat : "");
+  $("endStats").innerHTML = [["Time", mm + ":" + String(ss).padStart(2, "0")], ["Distance", ((m.dist || 0) / 1000).toFixed(2) + " km"], ["Strokes", (m.strokes || 0).toLocaleString()], ["Drills", m.drills || 0]].map(([k, v]) => `<div class="card"><div class="dim">${k}</div><div class="num" style="font-size:32px">${v}</div></div>`).join("");
+  const T = Math.max(1, m.end - m.start), pc = t => (100 * t / T).toFixed(2) + "%";
+  let tl = "", open = {}, hid = null;
+  evs.forEach(e => { if (e.type === "drill_start") open[e.n] = e.t; if (e.type === "drill_end" && open[e.n] != null) { tl += `<i style="left:${pc(open[e.n])};width:${pc(e.t - open[e.n])}">${e.n}</i>`; }
+    if (e.type === "rower" && e.t > 2000) tl += `<b style="left:${pc(e.t)}" title="${esc(seatLabel(e.seat) + ": " + e.name)}"></b>`;
+    if (e.type === "hidden") hid = e.t; if ((e.type === "visible" || e.type === "resume") && hid != null) { tl += `<s style="left:${pc(hid)};width:${pc(e.t - hid)}"></s>`; hid = null; } });
+  $("endTl").innerHTML = tl;
+  const ds = evs.filter(e => e.type === "drill_end");
+  $("endDrills").innerHTML = ds.map(e => `<div class="check"><span class="k" style="width:26px;height:26px;border-radius:7px;background:var(--drill);color:#2a1700;display:grid;place-items:center;font-weight:700">${e.n}</span><b style="flex:1">${esc(e.name || "Drill " + e.n)}</b><span class="dim">${e.strokes} strokes</span></div>`).join("")
+    + evs.filter(e => e.type === "rower" && e.t > 2000).map(e => `<div class="check"><span style="width:26px;text-align:center;color:var(--acc);font-weight:700">⇄</span><b style="flex:1">${esc(seatLabel(e.seat))} seat → ${esc(e.name)}</b><span class="dim">${Math.floor(e.t / 60000)} min in</span></div>`).join("");
+  $("btnExportEnd").onclick = () => exportSession(m.id);
+}
+
+// ================= home actions =================
+$("btnNew").onclick = () => { if (rec.on) { go("cox"); return; } go("connect"); };
+$("btnUpdate").onclick = async () => { toast("Checking for update…"); try { const r = await navigator.serviceWorker.getRegistration(); if (r) await r.update(); } catch (e) {} setTimeout(() => location.reload(), 600); };
+$("btnBackup").onclick = () => {
+  const out = { format: "cbhs-boat-settings/1", saved: new Date().toISOString(), settings: S, cal: {} };
+  for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (/^oarlock(Cal|Zero)/.test(k)) out.cal[k] = lsGet(k); }
+  const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([JSON.stringify(out, null, 1)], { type: "application/json" })); a.download = "boat-recorder-settings.json"; a.click(); toast("Settings saved to Downloads");
+};
+$("btnRestore").onclick = () => $("restoreFile").click();
+$("restoreFile").onchange = async e => {
+  const f = e.target.files[0]; if (!f) return;
+  try { const j = JSON.parse(await f.text()); if (j.format !== "cbhs-boat-settings/1") throw new Error("not a settings backup");
+    if (!(await ask("Restore settings?", "Replaces this phone's calibrations, seats, rowers and rig with the backup.", "Restore"))) return;
+    S = Object.assign(S, j.settings); saveS(); Object.entries(j.cal || {}).forEach(([k, v]) => lsSet(k, v)); toast("Settings restored"); } catch (err) { toast("Restore failed: " + err.message); }
+  e.target.value = "";
+};
+$("verTxt").textContent = "Version " + VERSION;
+
+// ================= boot =================
+(async () => {
+  try { db = await openDb(); } catch (e) { toast("Storage unavailable: sessions won't save"); }
+  loadSessions(); restoreDevices();
+  if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+})();
+</script>
+</body>
+</html>
