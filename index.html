@@ -198,6 +198,9 @@
     <select id="wType"><option value="steady">Steady – one target rate</option><option value="stepped">Stepped – rate changes each step</option></select>
     <div id="wSteadyBox"><label class="f">Target rate (spm)</label><input type="number" id="wRate" inputmode="numeric" min="10" max="60"></div>
     <div id="wStepsBox"><label class="f">Steps (time as m:ss, or metres)</label><div id="wSteps"></div>
+      <label class="f">Rest between steps (m:ss) – 0 = continuous</label>
+      <input type="text" id="wRest" inputmode="decimal" placeholder="0">
+      <p class="note">With a rest set, each step is a separate piece: recording starts on your first stroke of each piece, stops when the piece is done, and paddle strokes in the rest are not saved.</p>
       <button id="wAddStep" class="btn small">+ Add step</button></div>
     <div class="row" style="margin-top:12px"><button id="wCancel" class="btn grow">Cancel</button><button id="wSave" class="btn primary grow">Save workout</button></div>
   </div>
@@ -422,7 +425,7 @@
 <script>
 "use strict";
 /* Bump on every release so the version at the bottom of the page shows what's loaded */
-const APP_VERSION = '5.5';
+const APP_VERSION = '5.6';
 const APP_DATE = '16 Nov 2026';
 /* =====================================================================
    PM5 Bluetooth definitions (Concept2 PM5 Bluetooth Smart Interface)
@@ -579,6 +582,7 @@ function startRecording(rower) {
               dragFactor: live.general.dragFactor || null, monitor: live.monitorInfo || null,
               forceSource: live.forceSource || null, strokes: [],
               workout: activeWorkout() ? JSON.parse(JSON.stringify(activeWorkout())) : null, wstate: newWState() };
+  if (isPieces(session.workout)) session.pieces = { phase: 'wait', idx: 0, t: 0, d: 0, restStart: null };
   live.strokes = session.strokes;
   live.pendingCurve = null;
   resetRecCounters();
@@ -644,9 +648,13 @@ function onStrokeRecord(sd) {
   };
   const pc = live.pendingCurve;
   if (pc && st.t - pc.t < 2500) { attachCurve(st, pc.raw, pc.src); live.pendingCurve = null; }
+  if (session && pieceMode() && !pieceStroke(st)) {
+    preview.push(st); if (preview.length > 30) preview.shift();   // rest / paddle stroke: shown, not saved
+    updateTiles(); drawLive(); return;
+  }
   if (session) {
-    const wp = currentSingleProgress(true);
-    if (wp) { st.target = wp.target; st.step = wp.done ? null : wp.idx; }
+    if (!pieceMode()) { const wp = currentSingleProgress(true);
+      if (wp) { st.target = wp.target; st.step = wp.done ? null : wp.idx; } }
     session.strokes.push(st);
     session.end = st.t;
     if (live.general.dragFactor) session.dragFactor = live.general.dragFactor;
@@ -1158,15 +1166,49 @@ const rec = { time: 0, dist: 0, lastT: null, lastD: null };
 function resetRecCounters() {
   rec.time = 0; rec.dist = 0; rec.startAt = performance.now(); rec.lastT = clock.pm; rec.lastD = live.general.distance ?? null;
 }
+/* ===== PIECES MODE: stepped workout with a rest. Only the pieces are recorded.
+   wait -> (first stroke) work -> (amount reached) rest -> (first stroke after rest) work ... -> done ===== */
+const isPieces = w => !!(w && w.type === 'stepped' && w.rest > 0 && w.steps && w.steps.length);
+const pieceMode = () => !!(session && isPieces(session.workout));
+const PM5_REST = 3;   // PM5 workout state "interval rest"
+function pieceStart(ps, st) {
+  ps.phase = 'work'; ps.t = 0; ps.d = 0; ps.startedAt = Date.now();
+  log(`Piece ${ps.idx + 1} started`); toast(`Piece ${ps.idx + 1} started – recording`);
+}
+function pieceCheckEnd() {
+  const ps = session && session.pieces; if (!ps || ps.phase !== 'work') return;
+  const step = session.workout.steps[ps.idx];
+  const done = step.kind === 'time' ? ps.t >= step.amount : ps.d >= step.amount;
+  if (!done) return;
+  log(`Piece ${ps.idx + 1} done (${Math.round(ps.d)} m, ${fmtTime(ps.t)})`);
+  ps.idx++; ps.restStart = Date.now();
+  if (ps.idx >= session.workout.steps.length) { ps.phase = 'done'; toast('Workout complete – tap Finish & save'); }
+  else { ps.phase = 'rest'; toast(`Piece ${ps.idx} done – rest. Paddling won't be recorded`); }
+  saveSession();
+}
+/* decides what to do with a stroke in pieces mode: returns true if it should be saved */
+function pieceStroke(st) {
+  const ps = session.pieces, w = session.workout;
+  if (ps.phase === 'done') return false;
+  if (ps.phase === 'wait' || ps.phase === 'rest') {
+    const restLeft = ps.phase === 'rest' ? w.rest - (Date.now() - ps.restStart) / 1000 : 0;
+    if (restLeft > 3 || live.general.workoutState === PM5_REST) return false;   // still resting
+    pieceStart(ps, st);
+  }
+  st.target = w.steps[ps.idx].rate; st.step = ps.idx; st.piece = ps.idx + 1;
+  return true;
+}
 function syncDist(D) {
   if (D == null || isNaN(D)) return;
-  if (session && rec.lastD != null) { const dd = D - rec.lastD; if (dd > 0 && dd < 100) rec.dist += dd; }
+  if (session && rec.lastD != null) { const dd = D - rec.lastD; if (dd > 0 && dd < 100) { rec.dist += dd;
+    if (pieceMode() && session.pieces.phase === 'work') { session.pieces.d += dd; pieceCheckEnd(); } } }
   rec.lastD = D;
 }
 function syncClock(t) {
   if (t == null || isNaN(t)) return;
   const now = performance.now();
-  if (session && rec.lastT != null && t !== rec.lastT) { const d = t - rec.lastT; if (d > 0 && d < 5) rec.time += d; }
+  if (session && rec.lastT != null && t !== rec.lastT) { const d = t - rec.lastT; if (d > 0 && d < 5) { rec.time += d;
+    if (pieceMode() && session.pieces.phase === 'work') { session.pieces.t += d; pieceCheckEnd(); } } }
   if (t !== rec.lastT) rec.lastT = t;
   if (clock.pm != null) {
     if (t > clock.pm + 0.001) clock.running = true;
@@ -2152,6 +2194,7 @@ function activeWorkout() { return getWorkouts().find(w => w.id === activeWorkout
 const amountStr = s => s.kind === 'time' ? fmtTime(s.amount) : `${s.amount} m`;
 function workoutSummary(w) {
   if (!w) return '';
+  if (isPieces(w)) return w.steps.map(s => `${amountStr(s)} @ ${s.rate}`).join(', ') + ` · rest ${fmtTime(w.rest)} · pieces only`;
   return w.type === 'steady' ? `Steady · ${w.rate} spm` : w.steps.map(s => `${amountStr(s)} @ ${s.rate}`).join(' → ');
 }
 const newWState = () => ({ idx: 0, startT: 0, startD: 0 });
@@ -2194,7 +2237,20 @@ function currentSingleProgress(advance) {
 function updateWorkoutStrip() {
   const el = $('wStrip'); if (!el) return;
   let big = '', small = '';
-  if (session && session.workout) {
+  if (pieceMode()) {
+    const ps = session.pieces, w = session.workout, n = w.steps.length, step = w.steps[Math.min(ps.idx, n - 1)];
+    const amt = s => s.kind === 'time' ? fmtTime(s.amount) : (s.amount >= 1000 && s.amount % 1000 === 0 ? s.amount / 1000 + 'k' : s.amount + ' m');
+    if (ps.phase === 'wait') { big = step.rate + ' spm'; small = `Piece 1/${n} (${amt(step)}) – starts on your first stroke. Nothing recorded until then.`; applyTraffic($('tRate'), null); }
+    else if (ps.phase === 'work') {
+      const left = step.kind === 'time' ? fmtTime(Math.max(0, step.amount - ps.t)) + ' left' : Math.max(0, Math.round(step.amount - ps.d)) + ' m left';
+      big = step.rate + ' spm'; small = `Piece ${ps.idx + 1}/${n} · ${amt(step)} @ ${step.rate} · ${left}`;
+      applyTraffic($('tRate'), trafficFor(live.strokes, step.rate));
+    } else if (ps.phase === 'rest') {
+      const restLeft = Math.max(0, w.rest - (Date.now() - ps.restStart) / 1000);
+      big = 'Rest'; small = `${fmtTime(restLeft)} left · next: piece ${ps.idx + 1}/${n} (${amt(step)} @ ${step.rate}) starts on your first stroke after the rest. Paddling isn't recorded.`;
+      applyTraffic($('tRate'), null);
+    } else { big = 'Done ✓'; small = 'All pieces complete. Tap Finish & save session.'; applyTraffic($('tRate'), null); }
+  } else if (session && session.workout) {
     const wp = currentSingleProgress(false);
     big = wp.done ? 'Done ✓' : wp.target + ' spm';
     small = (session.workout.name ? session.workout.name + ' · ' : '') + progressText(wp, session.workout);
@@ -2240,6 +2296,7 @@ function openWorkoutEditor(w) {
   if (!wEdit.steps || !wEdit.steps.length) wEdit.steps = [{ kind: 'time', amount: 240, rate: wEdit.rate || 20 }];
   $('wEdTitle').textContent = w ? 'Edit workout' : 'New workout';
   $('wName').value = wEdit.name; $('wType').value = wEdit.type; $('wRate').value = wEdit.rate || 20;
+  $('wRest').value = wEdit.rest ? fmtTime(wEdit.rest) : '0';
   renderStepRows(); syncTypeBoxes();
   $('wEditor').classList.remove('hidden'); $('wEditor').scrollIntoView({ behavior: 'smooth' });
 }
@@ -2273,6 +2330,7 @@ function saveWorkoutFromEditor() {
     const r = +row.querySelector('.r').value; if (r >= 10 && r <= 60) s.rate = r;
   });
   wEdit.name = $('wName').value.trim(); wEdit.type = $('wType').value;
+  { const rt = String($('wRest').value).trim(); wEdit.rest = !rt || rt === '0' ? 0 : (parseAmount('time', rt) || 0); }
   const r = +$('wRate').value; if (r >= 10 && r <= 60) wEdit.rate = r;
   if (!wEdit.name) wEdit.name = workoutSummary(wEdit);
   const all = getWorkouts();
