@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b1a2e">
+<title>Oarlock Raw Logger</title>
+<link rel="icon" href="icon-192.png">
+<style>
+  :root { --bg:#0b1a2e; --card:#13263f; --ink:#eef3f8; --dim:#8ea3b8; --acc:#4fc3f7; --hot:#ffb74d; --ok:#81c784; --bad:#ef5350; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:system-ui,-apple-system,Roboto,sans-serif; background:var(--bg); color:var(--ink); }
+  header { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:12px 14px 4px; }
+  h1 { font-size:17px; margin:0; } h2 { font-size:15px; margin:0 0 8px; }
+  #status { font-size:13px; color:var(--dim); text-align:right; }
+  #status.ok { color:var(--ok); } #status.err { color:var(--bad); }
+  main { padding:6px 12px 40px; max-width:560px; margin:0 auto; }
+  .card { background:var(--card); border-radius:14px; padding:12px; margin-bottom:10px; }
+  button { font-size:15px; font-weight:600; padding:12px 10px; border-radius:10px; border:0; background:#24405f; color:var(--ink); min-height:46px; }
+  button.pri { background:var(--acc); color:#04223a; }
+  button.on { background:var(--hot); color:#2a1700; }
+  button:disabled { opacity:.4; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; } .row > * { flex:1; }
+  .grid { display:grid; grid-template-columns:repeat(4,1fr); gap:6px; }
+  .big { font-size:30px; font-weight:700; font-variant-numeric:tabular-nums; }
+  .dim { color:var(--dim); font-size:13px; }
+  #label { font-size:22px; font-weight:700; color:var(--hot); }
+  .bytes { display:flex; flex-wrap:wrap; gap:3px; margin:6px 0 10px; font-family:ui-monospace,monospace; font-size:13px; }
+  .bytes span { width:38px; text-align:center; padding:3px 0; border-radius:5px; background:#0b1a2e; }
+  .bytes span i { display:block; font-style:normal; font-size:9px; color:var(--dim); }
+  .bytes span.chg { background:var(--hot); color:#2a1700; } .bytes span.chg i { color:#2a1700; }
+  table { width:100%; border-collapse:collapse; font-size:13px; font-variant-numeric:tabular-nums; }
+  th, td { padding:5px 3px; border-bottom:1px solid #24405f; text-align:right; } th:first-child, td:first-child { text-align:left; }
+  th { color:var(--dim); font-weight:600; }
+  input, textarea { font:16px system-ui,sans-serif; background:#0b1a2e; color:var(--ink); border:1px solid #24405f; border-radius:10px; padding:10px; width:100%; }
+  textarea { font:12px ui-monospace,monospace; height:70px; }
+  details summary { cursor:pointer; color:var(--dim); font-size:13px; padding:6px 0; }
+  .wrap { overflow-x:auto; }
+</style>
+</head>
+<body>
+<header><h1>OARLOCK RAW LOGGER</h1><div id="status">Not connected</div></header>
+<main>
+  <div class="card">
+    <div class="row"><button class="pri" id="btnConnect">Connect oarlock</button><button id="btnClear">Clear log</button></div>
+    <div class="grid" style="margin-top:10px;text-align:center">
+      <div><div class="big" id="vPk">0</div><div class="dim">packets</div></div>
+      <div><div class="big" id="vHz">0</div><div class="dim">per sec</div></div>
+      <div><div class="big" id="vAng">--</div><div class="dim">angle °</div></div>
+      <div><div class="big" id="vBat">--</div><div class="dim">battery %</div></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>What are you doing right now?</h2>
+    <div class="dim">Tap a label while holding the load steady. Tap "Moving" while you change load, so transitions are left out of the analysis.</div>
+    <div style="margin:8px 0">Current: <span id="label">Moving</span></div>
+    <div class="grid" id="labels"></div>
+    <div class="row" style="margin-top:8px"><input id="custom" placeholder="Custom, e.g. 20 kg at handle"><button id="btnCustom" style="flex:0 0 90px">Mark</button></div>
+  </div>
+
+  <div class="card">
+    <h2>Live bytes</h2>
+    <div class="dim">Orange = changed in the last second. Hold the oar still and push: the force bytes light up.</div>
+    <div id="live"></div>
+  </div>
+
+  <div class="card">
+    <h2>Force finder</h2>
+    <div class="dim">Ranks every byte and 2-byte field by how cleanly it separates your labels (high score = changes between labels, steady within each). Strokes labels are left out. Needs 2+ labels.</div>
+    <div class="wrap"><table id="rank"><tr><td class="dim">Label a few loads first.</td></tr></table></div>
+  </div>
+
+  <div class="card">
+    <h2>Export</h2>
+    <div class="row"><button class="pri" id="btnCsv">Download CSV</button><button id="btnShare">Share CSV</button></div>
+    <div class="dim" id="expInfo" style="margin-top:6px"></div>
+    <details><summary>Advanced: start command field table</summary>
+      <div class="dim">The 0x0063 start command asks the oarlock for a list of fields. If no bytes move with force, the force field may not be in this list. Edit and reconnect to try others.</div>
+      <textarea id="startHex"></textarea>
+      <button id="btnResetHex" style="margin-top:6px">Reset to Oarlock Live default</button>
+    </details>
+  </div>
+  <div class="dim" style="text-align:center">Use Chrome. Bluetooth + Location on. SpeedCoach off.</div>
+</main>
+
+<script>
+"use strict";
+const SVC_CTRL = "85920000-0338-4b83-ae4a-ac1d217adb03";
+const CTRL_REPLY = "85920100-0338-4b83-ae4a-ac1d217adb03";
+const CTRL_CMD = "85920200-0338-4b83-ae4a-ac1d217adb03";
+const SVC_DATA = "12630000-dd25-497d-9854-9b6c02c77054";
+const DATA1 = "12630001-dd25-497d-9854-9b6c02c77054";
+const DEFAULT_HEX = "6300" + "0d00" +
+  "31002b000200" + "32002b000200" + "220028000200" + "23002d000200" + "25002b000200" +
+  "26002e000100" + "27002e000100" + "280028000200" + "29002e000100" + "2a002e000100" +
+  "2b002e000100" + "33002e000100" + "34002e000100";
+const LABELS = ["No load", "Light push", "Medium push", "Hard push", "5 kg", "10 kg", "20 kg", "30 kg", "Strokes light", "Strokes hard", "Moving"];
+
+const $ = id => document.getElementById(id);
+function hex(s) { s = s.replace(/[^0-9a-f]/gi, ""); const a = new Uint8Array(s.length >> 1); for (let i = 0; i < a.length; i++) a[i] = parseInt(s.substr(i * 2, 2), 16); return a; }
+function toHex(u8) { return Array.from(u8, b => b.toString(16).padStart(2, "0")).join(""); }
+function crcX25(bytes) { let c = 0xFFFF; for (const b of bytes) { c ^= b; for (let i = 0; i < 8; i++) c = (c & 1) ? (c >>> 1) ^ 0x8408 : c >>> 1; } return (c ^ 0xFFFF) & 0xFFFF; }
+function buildFrame(type, payload) {
+  const body = [type & 255, type >> 8, payload.length & 255, payload.length >> 8, ...payload];
+  const c = crcX25(body); body.push(c & 255, c >> 8);
+  const out = [0x7E]; for (const b of body) { if (b === 0x7E || b === 0x7D) out.push(0x7D, b ^ 0x20); else out.push(b); } out.push(0x7E);
+  return new Uint8Array(out);
+}
+// angle, using the same saved calibration as Oarlock Live (same site, same storage)
+const DEFAULT_CAL = [[19994, -59], [8051, -19], [-9911, 17], [-20111, 61]];
+let cal = DEFAULT_CAL; try { const s = JSON.parse(localStorage.getItem("oarlockCal") || "null"); if (s && s.length >= 2) cal = s; } catch (e) {}
+const calS = cal.slice().sort((a, b) => a[0] - b[0]);
+function rawToDeg(r) { let i = 0; while (i < calS.length - 2 && r > calS[i + 1][0]) i++; const a = calS[i], b = calS[i + 1]; return a[1] + (r - a[0]) * (b[1] - a[1]) / (b[0] - a[0]); }
+
+try { $("startHex").value = localStorage.getItem("loggerStartHex") || DEFAULT_HEX; } catch (e) { $("startHex").value = DEFAULT_HEX; }
+$("startHex").onchange = () => { try { localStorage.setItem("loggerStartHex", $("startHex").value); } catch (e) {} };
+$("btnResetHex").onclick = () => { $("startHex").value = DEFAULT_HEX; $("startHex").onchange(); };
+
+// ---------- log ----------
+let log = [], label = "Moving", t0 = performance.now(), recent = [];
+const chars = {}; // short -> {last:Uint8Array, changed:[time per byte]}
+const shortName = uuid => uuid.slice(4, 8);
+function setLabel(l) { label = l; $("label").textContent = l; document.querySelectorAll("#labels button").forEach(b => b.classList.toggle("on", b.textContent === l)); }
+$("labels").innerHTML = LABELS.map(l => `<button>${l}</button>`).join("");
+$("labels").onclick = e => { const b = e.target.closest("button"); if (b) setLabel(b.textContent); };
+$("btnCustom").onclick = () => { const v = $("custom").value.trim(); if (v) setLabel(v.slice(0, 40)); };
+$("btnClear").onclick = () => { log = []; t0 = performance.now(); renderRank(); };
+
+function onPacket(uuid, dv) {
+  const u8 = new Uint8Array(dv.buffer.slice(dv.byteOffset, dv.byteOffset + dv.byteLength));
+  const t = performance.now() - t0, s = shortName(uuid);
+  log.push({ t, c: s, l: label, b: u8 }); recent.push(performance.now());
+  const c = chars[s] || (chars[s] = { last: null, changed: [] });
+  const now = performance.now();
+  u8.forEach((b, i) => { if (!c.last || c.last[i] !== b) c.changed[i] = now; });
+  c.last = u8;
+  if (uuid === DATA1 && u8.length >= 8) { const r = dv.getInt16(6, true); $("vAng").textContent = rawToDeg(r).toFixed(1); }
+}
+
+// ---------- Bluetooth ----------
+let device = null;
+function setStatus(t, c) { $("status").textContent = t; $("status").className = c || ""; }
+async function connect() {
+  if (!navigator.bluetooth) { setStatus("No Web Bluetooth: use Chrome", "err"); return; }
+  try {
+    if (!device) {
+      setStatus("Pick the EmPower oarlock...");
+      device = await navigator.bluetooth.requestDevice({ filters: [{ namePrefix: "EmPower" }], optionalServices: [SVC_CTRL, SVC_DATA, "battery_service", "device_information"] });
+      device.addEventListener("gattserverdisconnected", () => { setStatus("Disconnected: tap Reconnect", "err"); $("btnConnect").textContent = "Reconnect"; });
+    }
+    setStatus("Connecting to " + device.name + "...");
+    const server = await device.gatt.connect();
+    const data = await server.getPrimaryService(SVC_DATA);
+    let subs = 0;
+    for (const ch of await data.getCharacteristics()) {
+      if (ch.properties.notify || ch.properties.indicate) {
+        ch.addEventListener("characteristicvaluechanged", ev => onPacket(ch.uuid, ev.target.value));
+        try { await ch.startNotifications(); subs++; } catch (e) {}
+      }
+    }
+    const ctrl = await server.getPrimaryService(SVC_CTRL);
+    const reply = await ctrl.getCharacteristic(CTRL_REPLY);
+    reply.addEventListener("characteristicvaluechanged", ev => onPacket(CTRL_REPLY, ev.target.value));
+    try { await reply.startNotifications(); subs++; } catch (e) {}
+    try {
+      const bs = await server.getPrimaryService("battery_service"), bl = await bs.getCharacteristic("battery_level");
+      $("vBat").textContent = (await bl.readValue()).getUint8(0);
+    } catch (e) {}
+    const cmd = await ctrl.getCharacteristic(CTRL_CMD), frame = buildFrame(0, hex($("startHex").value));
+    for (let i = 0; i < frame.length; i += 20) { const ck = frame.slice(i, i + 20); if (cmd.writeValueWithResponse) await cmd.writeValueWithResponse(ck); else await cmd.writeValue(ck); }
+    setStatus("Live: " + device.name + " · " + subs + " streams", "ok");
+    $("btnConnect").textContent = "Reconnect";
+    try { if (navigator.wakeLock) await navigator.wakeLock.request("screen"); } catch (e) {}
+  } catch (e) { setStatus("Failed: " + e.message, "err"); }
+}
+$("btnConnect").onclick = connect;
+
+// ---------- live view ----------
+setInterval(() => {
+  const now = performance.now(); recent = recent.filter(t => now - t < 1000);
+  $("vPk").textContent = log.length; $("vHz").textContent = recent.length;
+  $("live").innerHTML = Object.entries(chars).map(([s, c]) => `<div class="dim">Char ${s} · ${c.last.length} bytes</div><div class="bytes">` +
+    Array.from(c.last, (b, i) => `<span class="${now - (c.changed[i] || 0) < 1000 ? "chg" : ""}"><i>${i}</i>${b.toString(16).padStart(2, "0")}</span>`).join("") + "</div>").join("");
+}, 250);
+
+// ---------- force finder ----------
+function fields(p) {
+  const out = [], b = p.b, dv = new DataView(b.buffer, b.byteOffset, b.byteLength);
+  for (let i = 0; i < b.length; i++) out.push([p.c + " @" + i + " u8", b[i]]);
+  for (let i = 0; i + 1 < b.length; i++) { out.push([p.c + " @" + i + " i16LE", dv.getInt16(i, true)]); out.push([p.c + " @" + i + " i16BE", dv.getInt16(i, false)]); }
+  return out;
+}
+function renderRank() {
+  const use = log.filter(p => p.l !== "Moving" && !/^Strokes/.test(p.l));
+  const labs = [...new Set(use.map(p => p.l))];
+  if (labs.length < 2) { $("rank").innerHTML = `<tr><td class="dim">Label at least 2 different loads (${labs.length} so far).</td></tr>`; return; }
+  const acc = {}; // field -> label -> [n, sum, sumsq]
+  for (const p of use) for (const [k, v] of fields(p)) { const a = (acc[k] = acc[k] || {}), g = (a[p.l] = a[p.l] || [0, 0, 0]); g[0]++; g[1] += v; g[2] += v * v; }
+  const rows = [];
+  for (const [k, a] of Object.entries(acc)) {
+    let N = 0, S = 0, within = 0; const means = {};
+    for (const l of labs) { const g = a[l]; if (!g) continue; N += g[0]; S += g[1]; means[l] = g[1] / g[0]; within += g[2] - g[1] * g[1] / g[0]; }
+    const grand = S / N; let between = 0; for (const l of labs) if (a[l]) between += a[l][0] * (means[l] - grand) ** 2;
+    if (between < 1e-9) continue;
+    const score = between / (labs.length - 1) / ((within + 1) / Math.max(1, N - labs.length));
+    rows.push({ k, score, means });
+  }
+  rows.sort((x, y) => y.score - x.score);
+  const top = rows.slice(0, 10);
+  $("rank").innerHTML = `<tr><th>Field</th><th>Score</th>${labs.map(l => `<th>${l.replace(/[<>&]/g, "")}</th>`).join("")}</tr>` +
+    top.map(r => `<tr><td>${r.k}</td><td>${r.score > 9999 ? r.score.toExponential(1) : r.score.toFixed(0)}</td>${labs.map(l => `<td>${r.means[l] == null ? "–" : r.means[l].toFixed(0)}</td>`).join("")}</tr>`).join("");
+}
+setInterval(renderRank, 2000);
+
+// ---------- export ----------
+function csv() {
+  return "time_ms,char,label,len,hex\n" + log.map(p => `${p.t.toFixed(1)},${p.c},"${p.l.replace(/"/g, "'")}",${p.b.length},${toHex(p.b)}`).join("\n");
+}
+function fileName() { const d = new Date(); return `oarlock-raw-${device ? device.name.replace(/\W+/g, "") : "log"}-${d.toISOString().slice(0, 16).replace(/[:T]/g, "")}.csv`; }
+$("btnCsv").onclick = () => {
+  if (!log.length) { $("expInfo").textContent = "Nothing logged yet."; return; }
+  const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([csv()], { type: "text/csv" })); a.download = fileName(); a.click();
+  $("expInfo").textContent = `Saved ${log.length} packets to Downloads.`;
+};
+$("btnShare").onclick = async () => {
+  if (!log.length) { $("expInfo").textContent = "Nothing logged yet."; return; }
+  const f = new File([csv()], fileName(), { type: "text/csv" });
+  try { if (navigator.canShare && navigator.canShare({ files: [f] })) await navigator.share({ files: [f], title: "Oarlock raw log" }); else $("expInfo").textContent = "Sharing not supported here: use Download."; }
+  catch (e) { $("expInfo").textContent = "Share cancelled."; }
+};
+</script>
+</body>
+</html>
