@@ -35,6 +35,17 @@
   #calHint { color:var(--dim); text-align:center; font-size:14px; margin-bottom:10px; }
   #calLog { font-size:13px; color:var(--dim); font-family:ui-monospace,monospace; white-space:pre-line; margin-top:8px; }
   .note { font-size:12px; color:var(--dim); text-align:center; margin-top:8px; }
+  #force { font-size:64px; font-weight:700; font-variant-numeric:tabular-nums; line-height:1; }
+  .fbox { display:flex; align-items:baseline; justify-content:center; gap:10px; }
+  .fbar { height:10px; background:#24405f; border-radius:5px; overflow:hidden; margin-top:8px; }
+  .fbar i { display:block; height:100%; width:0; background:var(--catch); }
+  #cvF { width:100%; height:230px; display:block; }
+  .chead { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:6px; }
+  .chead b { font-size:15px; }
+  .seg { display:flex; gap:4px; background:#0b1a2e; border-radius:10px; padding:3px; }
+  .seg button { flex:none; font-size:13px; padding:8px 12px; background:none; color:var(--dim); border-radius:8px; }
+  .seg button.on { background:#24405f; color:var(--ink); }
+  #calInfo.warn { color:var(--catch); font-weight:600; }
   #demoTag { display:none; text-align:center; color:var(--catch); font-weight:700; font-size:13px; }
 </style>
 </head>
@@ -60,12 +71,31 @@
   </div>
 
   <div class="card">
+    <div class="fbox"><span id="force">--</span><span class="note" style="margin:0">force<br>(likely N)</span></div>
+    <div class="fbar"><i id="fbar"></i></div>
+  </div>
+
+  <div class="card">
+    <div class="chead"><b>Force curve</b>
+      <div class="seg"><button class="on" id="mAng">vs angle</button><button id="mTime">vs time</button></div></div>
+    <canvas id="cvF"></canvas>
+    <div class="note">Thick = last stroke · faded = previous 5 · dot = right now</div>
+  </div>
+
+  <div class="card">
+    <div class="stats" style="margin-bottom:12px">
+      <div><b id="sPeak">--</b><span>Peak force</span></div>
+      <div><b id="sAvg">--</b><span>Avg force</span></div>
+      <div><b id="sPkA">--</b><span>Peak at °</span></div>
+      <div><b id="sEff">--</b><span>Eff. length</span></div>
+    </div>
     <div class="stats">
       <div><b id="sCatch">--</b><span>Catch</span></div>
       <div><b id="sFin">--</b><span>Finish</span></div>
       <div><b id="sLen">--</b><span>Length</span></div>
       <div><b id="sRate">--</b><span>Rate</span></div>
     </div>
+    <div class="note" id="slipNote">Slip / wash: --</div>
     <div class="note" id="strokeNote">Stats update after each stroke</div>
   </div>
 
@@ -88,6 +118,7 @@
   </div>
   <div class="note" id="calInfo"></div>
   <div class="note">Use Chrome. Turn on Bluetooth and Location. SpeedCoach must be off.</div>
+  <div class="note">Force = raw oarlock value (bytes 2–3), likely Newtons; units to be confirmed.</div>
 </main>
 
 <script>
@@ -124,14 +155,26 @@ function buildFrame(type, payload) {
 const PEGS = [["B", -59], ["D", -19], ["C", 17], ["A", 61]];
 // Default = Harry's test oarlock 1103748, pin-calibrated 23 Nov 2026
 const DEFAULT_CAL = [[19994, -59], [8051, -19], [-9911, 17], [-20111, 61]];
-let calPts = loadCal();
+// Calibration is stored per oarlock serial (device name, e.g. EmPowerSW1104485)
+let calName = null, calSource = "default";
+let calPts = loadCal(null);
 let rawToDeg = makeCurve(calPts);
 
-function loadCal() {
-  try { const s = localStorage.getItem("oarlockCal"); if (s) { const p = JSON.parse(s); if (p.length >= 2) return p; } } catch (e) {}
+function serialOf(name) { const m = (name || "").match(/(\d{6,})/); return m ? m[1] : null; }
+function loadCal(name) {
+  const ser = serialOf(name);
+  try {
+    if (ser) { const s = localStorage.getItem("oarlockCal:" + ser); if (s) { const p = JSON.parse(s); if (p.length >= 2) { calSource = "own"; return p; } } }
+    if (!ser || ser === "1103748") { const s = localStorage.getItem("oarlockCal"); if (s) { const p = JSON.parse(s); if (p.length >= 2) { calSource = ser ? "own" : "phone"; return p; } } }
+  } catch (e) {}
+  calSource = (!ser || ser === "1103748") ? "default" : "borrowed";
   return DEFAULT_CAL;
 }
-function saveCal(p) { try { localStorage.setItem("oarlockCal", JSON.stringify(p)); } catch (e) {} }
+function saveCal(p) {
+  const ser = serialOf(calName);
+  try { localStorage.setItem(ser ? "oarlockCal:" + ser : "oarlockCal", JSON.stringify(p)); } catch (e) {}
+  calSource = "own";
+}
 function makeCurve(points) {
   const pts = points.slice().sort((a, b) => a[0] - b[0]);
   const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]), n = xs.length;
@@ -168,7 +211,7 @@ function feedStroke(t, a) {
     }
   } else {
     if (a > st.ext) { st.ext = a; st.extT = t; }
-    else if (a < st.ext - HYST) { st.finA = st.ext; st.finT = st.extT; st.mode = "catch"; st.ext = a; st.extT = t; }
+    else if (a < st.ext - HYST) { st.finA = st.ext; st.finT = st.extT; if (st.catchT !== null) onDrive(st.catchT, st.finT); st.mode = "catch"; st.ext = a; st.extT = t; }
   }
 }
 function resetStrokes() { Object.assign(st, { mode: "catch", ext: null, catchA: null, catchT: null, finA: null, n: 0 }); }
@@ -189,7 +232,8 @@ $("track").setAttribute("d", arcPath(-MAXA, MAXA, R + 12));
   $("ticks").innerHTML = s;
 })();
 
-let curAngle = null, lastRaw = null, lastPacket = 0;
+let curAngle = null, curForce = null, lastRaw = null, lastPacket = 0;
+const buf = [], drives = []; let fMode = "angle";
 function showStroke(c, f, rate) {
   $("sCatch").textContent = c.toFixed(0); $("sFin").textContent = "+" + f.toFixed(0).replace("-", "");
   if (f < 0) $("sFin").textContent = f.toFixed(0);
@@ -203,23 +247,84 @@ function draw() {
     const a = Math.max(-MAXA, Math.min(MAXA, curAngle)), [x, y] = polar(a, R - 2);
     $("needle").setAttribute("x2", x); $("needle").setAttribute("y2", y);
   }
+  if (curForce !== null) {
+    $("force").textContent = curForce.toFixed(0);
+    $("fbar").style.width = Math.max(0, Math.min(100, curForce / 6)) + "%";
+  }
+  try { drawForce(); } catch (e) {}
   requestAnimationFrame(draw);
 }
 requestAnimationFrame(draw);
 function setStatus(txt, cls) { const s = $("status"); s.textContent = txt; s.className = cls || ""; }
 function showCalInfo() {
-  const isDef = calPts === DEFAULT_CAL;
-  $("calInfo").textContent = isDef ? "Using saved calibration for oarlock 1103748 (23 Nov). Recalibrate if the gate has moved."
-                                   : "Using your latest calibration on this phone.";
+  const ser = serialOf(calName), el = $("calInfo");
+  el.className = "note" + (calSource === "borrowed" ? " warn" : "");
+  el.textContent = calSource === "own" ? `Angle calibration: oarlock ${ser || ""} (saved on this phone).`
+    : calSource === "borrowed" ? `Oarlock ${ser} isn't calibrated yet, so angles are approximate (using 1103748's). Tap Calibrate.`
+    : calSource === "phone" ? "Using your latest calibration on this phone."
+    : "Using saved calibration for oarlock 1103748 (23 Nov). Recalibrate if the gate has moved.";
 }
 showCalInfo();
 
-function onRaw(raw) {
-  lastRaw = raw; lastPacket = Date.now();
+function onRaw(raw, force) {
+  const t = Date.now();
+  lastRaw = raw; lastPacket = t;
   rawSamples.push(raw); if (rawSamples.length > 400) rawSamples.splice(0, 200);
-  curAngle = rawToDeg(raw);
-  feedStroke(Date.now(), curAngle);
+  curAngle = rawToDeg(raw); curForce = force == null ? null : force;
+  buf.push({ t, a: curAngle, f: curForce || 0 }); if (buf.length > 900) buf.splice(0, 300);
+  feedStroke(t, curAngle);
 }
+
+// ---------- force per stroke (drive = catch to finish) ----------
+function onDrive(t0, t1) {
+  const D = buf.filter(s => s.t >= t0 - 60 && s.t <= t1 + 60);
+  if (D.length < 4) return;
+  let pk = 0, pa = 0; D.forEach(s => { if (s.f > pk) { pk = s.f; pa = s.a; } });
+  const cat = Math.min(...D.map(s => s.a)), fin = Math.max(...D.map(s => s.a));
+  const d = { s: D, t0, peak: pk, peakA: pa, catch: cat, finish: fin };
+  if (pk > 20) {
+    const thr = 0.3 * pk; let r = D.findIndex(s => s.f >= thr), l = D.length - 1; while (l > 0 && D[l].f < thr) l--;
+    d.slip = D[r].a - cat; d.wash = fin - D[l].a; d.eff = (fin - cat) - d.slip - d.wash;
+    let sum = 0, n = 0; for (let k = r; k <= l; k++) { sum += D[k].f; n++; } d.avg = sum / n;
+  }
+  drives.push(d); if (drives.length > 6) drives.shift();
+  $("sPeak").textContent = pk.toFixed(0);
+  $("sPkA").textContent = pk > 20 ? (pa > 0 ? "+" : "") + pa.toFixed(0) : "--";
+  $("sAvg").textContent = d.avg != null ? d.avg.toFixed(0) : "--";
+  $("sEff").textContent = d.eff != null ? d.eff.toFixed(0) : "--";
+  $("slipNote").textContent = d.slip != null ? `Slip ${d.slip.toFixed(0)}° · wash ${d.wash.toFixed(0)}° (below 30% of peak)` : "Slip / wash: no force this stroke";
+}
+
+function drawForce() {
+  const c = $("cvF"), r = c.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+  if (!r.width) return;
+  if (c.width !== Math.round(r.width * dpr)) { c.width = Math.round(r.width * dpr); c.height = Math.round(r.height * dpr); }
+  const x = c.getContext("2d"); x.setTransform(dpr, 0, 0, dpr, 0, 0); x.clearRect(0, 0, r.width, r.height);
+  const W = r.width, H = r.height, L = 36, B = 22, T = 8;
+  const live = st.mode === "finish" && st.catchT !== null ? buf.filter(s => s.t >= st.catchT - 60) : [];
+  let fMax = 300; drives.forEach(d => fMax = Math.max(fMax, d.peak)); live.forEach(s => fMax = Math.max(fMax, s.f)); fMax *= 1.1;
+  const Y = f => H - B - Math.max(0, f) / fMax * (H - B - T);
+  let X, xt;
+  if (fMode === "angle") { X = a => L + (a + 70) / 135 * (W - L - 6); xt = [-60, -30, 0, 30, 60]; }
+  else { let tm = 1.2; drives.forEach(d => tm = Math.max(tm, (d.s[d.s.length - 1].t - d.t0) / 1000 + 0.1)); X = s => L + s / tm * (W - L - 6); xt = [0, 0.5, 1, 1.5, 2].filter(v => v <= tm); }
+  x.strokeStyle = "#24405f"; x.fillStyle = "#8ea3b8"; x.font = "11px system-ui,sans-serif"; x.lineWidth = 1;
+  xt.forEach(v => { const px = X(v); x.beginPath(); x.moveTo(px, T); x.lineTo(px, H - B); x.stroke(); x.fillText(fMode === "angle" ? (v > 0 ? "+" : "") + v : v + "s", px - 8, H - 6); });
+  const step = fMax > 800 ? 200 : 100;
+  for (let f = 0; f < fMax; f += step) { const py = Y(f); x.beginPath(); x.moveTo(L, py); x.lineTo(W - 4, py); x.stroke(); x.fillText(f, 2, py + 4); }
+  const line = (S, t0, w, col, alpha) => {
+    x.globalAlpha = alpha; x.strokeStyle = col; x.lineWidth = w; x.lineJoin = "round"; x.beginPath();
+    S.forEach((s, k) => { const px = fMode === "angle" ? X(s.a) : X((s.t - t0) / 1000); k ? x.lineTo(px, Y(s.f)) : x.moveTo(px, Y(s.f)); });
+    x.stroke(); x.globalAlpha = 1;
+  };
+  drives.forEach((d, k) => line(d.s, d.t0, k === drives.length - 1 && !live.length ? 3.5 : 2, "#4fc3f7", k === drives.length - 1 ? (live.length ? .35 : 1) : .15));
+  if (live.length > 1) line(live, st.catchT, 3.5, "#ffb74d", 1);
+  if (curAngle !== null && curForce !== null && fMode === "angle") { x.fillStyle = "#eef3f8"; x.beginPath(); x.arc(X(curAngle), Y(curForce), 5, 0, 7); x.fill(); }
+  const ld = drives[drives.length - 1];
+  if (ld && ld.peak > 20) { const px = fMode === "angle" ? X(ld.peakA) : X((ld.s.find(s => s.f === ld.peak).t - ld.t0) / 1000);
+    x.fillStyle = "#eef3f8"; x.font = "600 12px system-ui,sans-serif"; x.fillText("peak " + ld.peak.toFixed(0), Math.min(px + 6, W - 70), Math.max(14, Y(ld.peak) - 6)); }
+}
+$("mAng").onclick = () => { fMode = "angle"; $("mAng").classList.add("on"); $("mTime").classList.remove("on"); };
+$("mTime").onclick = () => { fMode = "time"; $("mTime").classList.add("on"); $("mAng").classList.remove("on"); };
 
 // ---------- Bluetooth ----------
 let device = null, demoTimer = null;
@@ -237,12 +342,13 @@ async function connect() {
 }
 async function startStream() {
   setStatus("Connecting to " + device.name + "...");
+  if (calName !== device.name) { calName = device.name; calPts = loadCal(calName); rawToDeg = makeCurve(calPts); showCalInfo(); }
   const server = await device.gatt.connect();
   const data = await server.getPrimaryService(SVC_DATA);
   const ctrl = await server.getPrimaryService(SVC_CTRL);
   const d1 = await data.getCharacteristic(DATA1);
   d1.addEventListener("characteristicvaluechanged", ev => {
-    const v = ev.target.value; if (v.byteLength >= 8) onRaw(v.getInt16(6, true));
+    const v = ev.target.value; if (v.byteLength >= 8) onRaw(v.getInt16(6, true), v.getInt16(2, true));
   });
   await d1.startNotifications();
   const reply = await ctrl.getCharacteristic(CTRL_REPLY);
@@ -253,7 +359,7 @@ async function startStream() {
     const chunk = frame.slice(i, i + 20);
     if (cmd.writeValueWithResponse) await cmd.writeValueWithResponse(chunk); else await cmd.writeValue(chunk);
   }
-  resetStrokes();
+  resetStrokes(); drives.length = 0;
   setStatus("Live: " + device.name, "ok");
   $("btnConnect").textContent = "Reconnect"; $("btnCal").disabled = false;
   try { if (navigator.wakeLock) await navigator.wakeLock.request("screen"); } catch (e) {}
@@ -271,7 +377,8 @@ function startDemo() {
     const drive = 0.4, c = -57 + Math.sin(t / 7) * 2, f = 44 + Math.cos(t / 5) * 2;
     const deg = ph < drive ? c + (f - c) * (1 - Math.cos(Math.PI * ph / drive)) / 2
                            : f - (f - c) * (1 - Math.cos(Math.PI * (ph - drive) / (1 - drive))) / 2;
-    onRaw(Math.round(inv(deg)));
+    let fd = 0; if (ph < drive) { const u = ph / drive; fd = u > .05 && u < .95 ? 420 * Math.pow(Math.sin(Math.PI * (u - .05) / .9), 1.4) * (1 - .25 * (u - .05)) : 0; }
+    onRaw(Math.round(inv(deg)), Math.round(fd + (Math.random() - .5) * 6));
   }, 50);
 }
 function stopDemo() { if (demoTimer) { clearInterval(demoTimer); demoTimer = null; } $("demoTag").style.display = "none"; $("btnDemo").textContent = "Demo mode"; }
