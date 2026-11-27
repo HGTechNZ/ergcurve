@@ -76,6 +76,10 @@ label.f { display:flex; flex-direction:column; gap:4px; font-size:12px; font-wei
 .tl { position:relative; height:28px; border-radius:8px; overflow:hidden; background:var(--line); }
 .tl i { position:absolute; top:0; bottom:0; background:var(--drill); color:#2a1700; font-size:12px; font-weight:700; font-style:normal; display:grid; place-items:center; }
 .tl b { position:absolute; top:0; bottom:0; width:3px; background:var(--acc); }
+.lg { display:grid; grid-template-columns:72px minmax(0,1fr) 64px 64px; gap:8px; align-items:center; padding:6px 0; border-bottom:1px solid var(--line); }
+.lg:last-child { border:0; } .lg .bar { position:relative; height:10px; border-radius:5px; background:var(--line); }
+.lg .bar i { position:absolute; top:-3px; width:6px; height:16px; margin-left:-3px; border-radius:3px; background:var(--acc); left:50%; }
+.lg.mv .bar i { background:var(--ok); } .lg.off { color:var(--badt); }
 .tl s { position:absolute; top:0; bottom:0; background:repeating-linear-gradient(45deg,#3b1a1d 0 4px,#24405f 4px 8px); }
 </style>
 </head>
@@ -99,6 +103,7 @@ label.f { display:flex; flex-direction:column; gap:4px; font-size:12px; font-wei
   </div>
   <div class="foot">
     <div class="row"><button id="btnUpdate" style="flex:1">Update now</button><button id="btnBackup" style="flex:1">Back up settings</button><button id="btnRestore" style="flex:1">Restore</button></div>
+    <button id="btnDiag">Copy diagnostics</button>
     <input type="file" id="restoreFile" accept=".json,application/json" hidden>
     <div class="dim" style="text-align:center" id="verTxt"></div>
   </div>
@@ -160,6 +165,7 @@ label.f { display:flex; flex-direction:column; gap:4px; font-size:12px; font-wei
   <div class="steps" data-step="4"></div>
   <div class="body">
     <div class="card" id="checks" style="padding:2px 14px"></div>
+    <div class="card" id="liveCard" style="padding:8px 14px"><div class="dim" style="margin-bottom:4px">Live gates · move each oar and check the right seat moves</div><div id="liveGates"></div></div>
     <div class="card dim">Recording saves to the phone as you go. Screen stays on. If anything closes the app, reopen it and tap Resume: the gap is marked.</div>
   </div>
   <div class="foot"><button class="go big" id="btnStart" style="min-height:72px;font-size:22px">Start session</button></div>
@@ -229,7 +235,24 @@ label.f { display:flex; flex-direction:column; gap:4px; font-size:12px; font-wei
 
 <script>
 "use strict";
-const VERSION = "v1.0 · 27 Nov 22:40";
+const VERSION = "v1.1 · 28 Nov 01:21";
+// ================= error capture (first, so it sees everything) =================
+// Last 20 errors are kept in localStorage "boat.errors" (new key) for Copy diagnostics; during a session they are also logged as events (type "error").
+const ERRS = (() => { try { const a = JSON.parse(localStorage.getItem("boat.errors") || "[]"); return Array.isArray(a) ? a : []; } catch (e) { return []; } })();
+let sessErrs = 0;
+function noteErr(msg, src) {
+  try {
+    msg = String(msg == null ? "unknown error" : msg).slice(0, 300); const now = Date.now(), last = ERRS.slice(-5).reverse().find(x => x.msg === msg);
+    if (last && now - last.at < 60000) { last.n = (last.n || 1) + 1; last.at = now; }
+    else {
+      ERRS.push({ at: now, msg, src: src || "", n: 1, v: VERSION }); while (ERRS.length > 20) ERRS.shift();
+      try { if (rec.on && sessErrs < 300) { sessErrs++; logEv({ type: "error", src: src || "", msg }); } } catch (e) {}
+    }
+    try { localStorage.setItem("boat.errors", JSON.stringify(ERRS)); } catch (e) {}
+  } catch (e) {}
+}
+window.addEventListener("error", e => noteErr((e.message || (e.error && e.error.message) || "error") + (e.lineno ? " @" + e.lineno + ":" + e.colno : ""), "uncaught"));
+window.addEventListener("unhandledrejection", e => { const r = e.reason; noteErr(r && (r.message || r.name) ? (r.name || "Error") + ": " + r.message : String(r), "promise"); });
 // ================= constants =================
 const SVC_CTRL = "85920000-0338-4b83-ae4a-ac1d217adb03", CTRL_REPLY = "85920100-0338-4b83-ae4a-ac1d217adb03", CTRL_CMD = "85920200-0338-4b83-ae4a-ac1d217adb03";
 const SVC_DATA = "12630000-dd25-497d-9854-9b6c02c77054", DATA1 = "12630001-dd25-497d-9854-9b6c02c77054";
@@ -305,13 +328,16 @@ function feed(g, t, a) {
       if (st.catchT !== null && st.finA !== null && st.finA - st.catchA >= MIN_LEN) {
         const cyc = (st.extT - st.catchT) / 1000;
         if (cyc > 1 && cyc < 10) { g.lastCycle = cyc; g.lastCatchT = st.extT; }
-        g.strokes++; onStroke(g, st.catchT);
       }
-      st.catchA = st.ext; st.catchT = st.extT; st.mode = "finish"; st.ext = a; st.extT = t;
+      st.catchA = st.ext; st.catchT = st.extT; st.finA = null; st.mode = "finish"; st.ext = a; st.extT = t;
     }
   } else {
     if (a > st.ext) { st.ext = a; st.extT = t; }
-    else if (a < st.ext - HYST) { st.finA = st.ext; st.mode = "catch"; st.ext = a; st.extT = t; }
+    else if (a < st.ext - HYST) {
+      st.finA = st.ext; st.mode = "catch"; st.ext = a; st.extT = t;
+      // v1.1: a stroke counts at its finish (was: at the next catch), so the drill count is never a stroke behind
+      if (st.catchT !== null && st.finA - st.catchA >= MIN_LEN) { g.strokes++; onStroke(g, st.catchT); }
+    }
   }
 }
 function refGate() { return gates.filter(g => g.conn).sort((a, b) => b.seat - a.seat)[0] || null; }
@@ -322,29 +348,96 @@ async function addGate() {
   try {
     const dev = await navigator.bluetooth.requestDevice({ filters: [{ namePrefix: "EmPower" }], optionalServices: [SVC_CTRL, SVC_DATA, "battery_service"] });
     let g = gates.find(x => x.name === dev.name);
-    if (!g) g = newGate(dev.name, dev, false); else g.dev = dev;
-    await connectGate(g); renderGates();
-  } catch (e) { if (e.name !== "NotFoundError") toast("Add failed: " + e.message); }
+    if (!g) { if (gates.length >= N()) { toast(`All ${N()} seats have a gate. Remove one first.`); return; } g = newGate(dev.name, dev, false); } else g.dev = dev;
+    renderGates(); await connectGate(g); renderGates();
+  } catch (e) { if (e.name !== "NotFoundError") { toast("Add failed: " + e.message); noteErr("Add gate: " + e.message, "bt"); } }
 }
-async function connectGate(g) {
-  const dev = g.dev; if (!dev) return false;
-  if (!dev._hooked) { dev._hooked = true; dev.addEventListener("gattserverdisconnected", () => { g.conn = false; logEv({ type: "disconnect", seat: g.seat, ser: g.ser }); renderGates(); setTimeout(() => reconnect(g), 1500); }); }
-  try {
-    const sv = await dev.gatt.connect(), data = await sv.getPrimaryService(SVC_DATA), ctrl = await sv.getPrimaryService(SVC_CTRL);
+// v1.1: connections go one at a time (Android's Bluetooth stack is flaky with parallel connects), each with a time limit,
+// and a supervisor below keeps retrying every few seconds for as long as a session is recording.
+let btChain = Promise.resolve();
+let CONNECT_TIMEOUT = 10000, SETUP_TIMEOUT = 15000; // gatt.connect() limit, then a separate limit for services + start command
+let RETRY_MAX = 10000; // supervisor backoff per gate: 3 s, 6 s, then every 10 s
+function within(p, ms, what) { let t; return Promise.race([p, new Promise((_, rej) => { t = setTimeout(() => rej(new Error(what + " timed out")), ms); })]).finally(() => clearTimeout(t)); }
+function connectGate(g) {
+  if (!g || g.sim || !g.dev) return Promise.resolve(false);
+  if (g.conn) return Promise.resolve(true);
+  if (g.connecting) return g.connecting;
+  const p = btChain.then(() => connectNow(g));
+  btChain = p.catch(() => false);
+  g.connecting = p.catch(() => false).finally(() => { g.connecting = null; });
+  return g.connecting;
+}
+function hookDevice(dev) {
+  if (dev._hooked) return; dev._hooked = true;
+  dev.addEventListener("gattserverdisconnected", () => {
+    const g = dev._gate; if (!g) return; const was = g.conn; g.conn = false; g.cmd = null;
+    if (was) { g.drops = (g.drops || 0) + 1; logEv({ type: "disconnect", seat: g.seat, ser: g.ser }); renderGates(); setTimeout(() => { if (gates.includes(g)) connectGate(g).then(ok => { if (ok) { toast(seatLabel(g.seat) + " gate reconnected"); renderGates(); } }); }, 1000); }
+  });
+}
+async function startStream(g) {
+  const f = frame(0, START_PAYLOAD);
+  for (let i = 0; i < f.length; i += 20) { const ck = f.slice(i, i + 20); if (g.cmd.writeValueWithResponse) await g.cmd.writeValueWithResponse(ck); else await g.cmd.writeValue(ck); }
+}
+async function connectNow(g) {
+  const dev = g.dev; if (!dev || g.conn || !gates.includes(g)) return !!g.conn;
+  dev._gate = g; hookDevice(dev); g.attempts = (g.attempts || 0) + 1;
+  const t0 = Date.now(); let setupStarted = false;
+  const conn = dev.gatt.connect(); conn.catch(() => {});
+  const work = (async () => {
+    const sv = await within(conn, CONNECT_TIMEOUT, "connect"); setupStarted = true; const data = await sv.getPrimaryService(SVC_DATA), ctrl = await sv.getPrimaryService(SVC_CTRL);
     const d1 = await data.getCharacteristic(DATA1);
-    if (!d1._hooked) { d1._hooked = true; d1.addEventListener("characteristicvaluechanged", ev => { const v = ev.target.value; if (v.byteLength >= 10) onData(g, v.getUint16(0, true), v.getInt16(2, true), v.getInt16(6, true), v.getInt16(8, true)); }); }
+    if (!d1._hooked) { d1._hooked = true; d1.addEventListener("characteristicvaluechanged", ev => { const gg = dev._gate, v = ev.target.value; if (gg && v && v.byteLength >= 10) onData(gg, v.getUint16(0, true), v.getInt16(2, true), v.getInt16(6, true), v.getInt16(8, true)); }); }
     await d1.startNotifications();
     try { await (await ctrl.getCharacteristic(CTRL_REPLY)).startNotifications(); } catch (e) {}
     try { const bs = await sv.getPrimaryService("battery_service"); g.bat = (await (await bs.getCharacteristic("battery_level")).readValue()).getUint8(0); } catch (e) {}
-    const cmd = await ctrl.getCharacteristic(CTRL_CMD), f = frame(0, START_PAYLOAD);
-    for (let i = 0; i < f.length; i += 20) { const ck = f.slice(i, i + 20); if (cmd.writeValueWithResponse) await cmd.writeValueWithResponse(ck); else await cmd.writeValue(ck); }
-    g.conn = true; logEv({ type: "connect", seat: g.seat, ser: g.ser }); return true;
-  } catch (e) { g.conn = false; return false; }
+    g.cmd = await ctrl.getCharacteristic(CTRL_CMD); await startStream(g);
+  })();
+  work.catch(() => {});
+  try {
+    await within(work, CONNECT_TIMEOUT + SETUP_TIMEOUT, "connect + setup");
+    if (!gates.includes(g)) { try { dev.gatt.disconnect(); } catch (e) {} return false; }
+    g.conn = true; g.connT = Date.now(); g.fails = 0; g.nextTry = 0; g.connMs = Date.now() - t0;
+    logEv({ type: "connect", seat: g.seat, ser: g.ser, side: g.side, attempts: g.attempts, ms: g.connMs, bat: g.bat == null ? null : g.bat }); g.attempts = 0;
+    if (rec.on && rec.meta && Array.isArray(rec.meta.gates) && !rec.meta.gates.some(x => x.ser === g.ser)) rec.meta.gates.push({ ser: g.ser, seat: g.seat, side: g.side, cal: calOf(g.ser).pts, zero: g.zero, sim: false, addedT: Date.now() - rec.t0 });
+    return true;
+  } catch (e) {
+    g.conn = false; g.cmd = null; g.fails = (g.fails || 0) + 1; g.nextTry = Date.now() + Math.min(3000 * Math.pow(2, g.fails - 1), RETRY_MAX);
+    noteErr("Gate " + g.ser + " (" + seatLabel(g.seat) + ") " + (setupStarted ? "setup" : "connect") + " failed: " + (e && e.message), "bt");
+    try { dev.gatt.disconnect(); } catch (x) {}
+    return false;
+  }
 }
-async function reconnect(g) { if (g.conn || g.sim || !g.dev) return; for (let i = 0; i < 5 && !g.conn; i++) { if (await connectGate(g)) { toast(seatLabel(g.seat) + " gate reconnected"); renderGates(); return; } await new Promise(r => setTimeout(r, 2000)); } }
+// Supervisor: every 3 s retry any gate that isn't connected (forever while recording; also while setting up).
+// While recording, a gate that says it's connected but has sent nothing for 6 s gets its start command again.
+setInterval(() => {
+  if (!(rec.on || ["connect", "rig", "cal", "ready"].includes(cur))) return;
+  gates.forEach(g => {
+    if (!g.sim && g.dev && !g.conn && !g.connecting && Date.now() >= (g.nextTry || 0)) connectGate(g).then(ok => { if (ok) { toast(seatLabel(g.seat) + " gate connected"); renderGates(); } });
+    else if ((rec.on || cur === "ready") && g.conn && !g.sim && g.cmd && !g.connecting && Date.now() - Math.max(g.last || 0, g.connT || 0) > 6000 && Date.now() - (g.kickT || 0) > 6000) {
+      g.kickT = Date.now(); logEv({ type: "restart_stream", seat: g.seat, ser: g.ser });
+      const p = btChain.then(() => g.conn && g.cmd ? within(startStream(g), 8000, "restart") : null); btChain = p.catch(() => false);
+      p.catch(e => { noteErr("Gate " + g.ser + " restart failed: " + e.message, "bt"); g.conn = false; g.cmd = null; try { g.dev.gatt.disconnect(); } catch (x) {} });
+    }
+  });
+}, 3000);
+function removeGate(ser) {
+  const i = gates.findIndex(g => g.ser === ser); if (i < 0) return; const g = gates[i]; gates.splice(i, 1);
+  if (g.dev) { g.dev._gate = null; try { g.dev.gatt.disconnect(); } catch (e) {} }
+  renderGates();
+}
 async function restoreDevices() {
   if (!navigator.bluetooth || !navigator.bluetooth.getDevices) return;
-  try { for (const dev of await navigator.bluetooth.getDevices()) { if (!/EmPower/.test(dev.name || "")) continue; let g = gates.find(x => x.name === dev.name); if (!g) g = newGate(dev.name, dev, false); else g.dev = dev; connectGate(g).then(renderGates); } } catch (e) {}
+  try {
+    // v1.1: only bring back the gates from the unfinished session, or from the last session, so other gates the phone has seen don't take seats
+    const live = (await allSessions()).filter(s => s.status === "recording").sort((a, b) => b.start - a.start)[0];
+    const want = live && Array.isArray(live.gates) && live.gates.length ? live.gates.map(x => x.ser) : Array.isArray(S.lastGates) && S.lastGates.length ? S.lastGates : null;
+    for (const dev of await navigator.bluetooth.getDevices()) {
+      if (!/EmPower/.test(dev.name || "")) continue; if (want && !want.includes(serialOf(dev.name))) continue;
+      let g = gates.find(x => x.name === dev.name);
+      if (!g) { if (gates.length >= N()) continue; g = newGate(dev.name, dev, false); } else g.dev = dev;
+      connectGate(g).then(renderGates);
+    }
+  } catch (e) { noteErr("Restore gates: " + e.message, "bt"); }
 }
 
 // simulator (for trying the flow without gates)
@@ -368,52 +461,88 @@ function startSim() {
 // ================= recording (IndexedDB) =================
 let db = null;
 function openDb() { return new Promise((res, rej) => { const r = indexedDB.open("boatRecorder", 1); r.onupgradeneeded = () => { const d = r.result; d.createObjectStore("sessions", { keyPath: "id" }); const c = d.createObjectStore("chunks", { autoIncrement: true }); c.createIndex("sid", "sid"); }; r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); }
-function tx(store, mode, fn) { return new Promise((res, rej) => { const t = db.transaction(store, mode), s = t.objectStore(store); const out = fn(s); t.oncomplete = () => res(out && out.result); t.onerror = () => rej(t.error); }); }
+function tx(store, mode, fn) { return new Promise((res, rej) => { const t = db.transaction(store, mode), s = t.objectStore(store); const out = fn(s); t.oncomplete = () => res(out && out.result); t.onerror = () => rej(t.error); t.onabort = () => rej(t.error || new Error("storage write aborted")); }); }
 const rec = { on: false, id: null, t0: 0, meta: null, buf: [], gps: [], ev: [], seq: 0, push(p) { this.buf.push(p); } };
 function logEv(e) { if (!rec.on) return; e.t = Date.now() - rec.t0; rec.ev.push(e); rec.meta.events = rec.meta.events || []; rec.meta.events.push(e); }
-async function flush() {
+// v1.1: chunk + session summary are written in ONE transaction (so seqNext can never lag the chunks), empty chunks are skipped,
+// and if a write fails the data goes back in the queue for the next try instead of being dropped.
+let saveWarned = 0;
+let flushChain = Promise.resolve();
+function flush() { const p = flushChain.then(flushNow, flushNow); flushChain = p.catch(() => {}); return p; } // one at a time, in order
+async function flushNow() {
   if (!rec.on || !db) return;
-  const chunk = { sid: rec.id, seq: rec.seq++, p: rec.buf.splice(0), g: rec.gps.splice(0), e: rec.ev.splice(0) };
+  const id = rec.id, p = rec.buf, g = rec.gps, e = rec.ev; rec.buf = []; rec.gps = []; rec.ev = [];
+  const has = p.length > 0 || g.length > 0 || e.length > 0, seq = has ? rec.seq++ : null;
   rec.meta.lastT = Date.now() - rec.t0; rec.meta.dist = Math.round(gps.dist); rec.meta.seqNext = rec.seq;
-  try { await tx("chunks", "readwrite", s => s.add(chunk)); await tx("sessions", "readwrite", s => s.put(rec.meta)); } catch (e) { toast("Save error: " + e.message); }
+  try {
+    await new Promise((res, rej) => { const t = db.transaction(["chunks", "sessions"], "readwrite"); if (has) t.objectStore("chunks").add({ sid: id, seq, p, g, e }); t.objectStore("sessions").put(rec.meta);
+      t.oncomplete = () => res(); t.onerror = () => rej(t.error); t.onabort = () => rej(t.error || new Error("storage write aborted")); });
+  } catch (err) {
+    if (rec.id === id) { rec.buf = p.concat(rec.buf); rec.gps = g.concat(rec.gps); rec.ev = e.concat(rec.ev); if (rec.buf.length > 400000) rec.buf.splice(0, rec.buf.length - 400000); }
+    noteErr("Save failed: " + (err && (err.name + " " + err.message)), "idb");
+    if (Date.now() - saveWarned > 15000) { saveWarned = Date.now(); toast("Save error: " + (err && err.message) + " (will retry)"); }
+  }
 }
 setInterval(flush, 2000);
-
-async function startSession(resumeMeta) {
-  try { await document.documentElement.requestFullscreen(); await screen.orientation.lock("landscape"); } catch (e) {}
-  if (resumeMeta) {
-    rec.id = resumeMeta.id; rec.t0 = resumeMeta.start; rec.meta = resumeMeta; rec.seq = resumeMeta.seqNext || 0;
-    rec.on = true; logEv({ type: "resume" }); gps.dist = resumeMeta.dist || 0;
-    if (resumeMeta.names && !Array.isArray(resumeMeta.names)) S.names = Object.assign({}, resumeMeta.names); if (resumeMeta.boatSize) S.size = resumeMeta.boatSize;
-  } else {
-    rec.id = "s" + Date.now(); rec.t0 = Date.now(); rec.seq = 0; gps.dist = 0;
-    rec.meta = { id: rec.id, start: rec.t0, status: "recording", version: VERSION, boat: S.rig.boat, boatSize: N(), seatNumbering: "1 = bow", rig: JSON.parse(JSON.stringify(S.rig)), names: Object.assign({}, S.names),
-      gates: gates.map(g => ({ ser: g.ser, seat: g.seat, side: g.side, cal: calOf(g.ser).pts, zero: g.zero, sim: !!g.sim })), events: [], strokes: 0, drills: 0 };
-    rec.on = true; S.lastRig = JSON.parse(JSON.stringify(S.rig)); saveS();
-    gates.forEach(g => { const n = S.names[g.seat]; if (n) logEv({ type: "rower", seat: g.seat, name: n }); });
-  }
-  await flush(); startGps(); keepAwake(); go("cox");
+// highest chunk seq already stored for a session, + 1 (so a resumed session never reuses a seq)
+function nextSeq(id) {
+  return new Promise(res => { try { const r = db.transaction("chunks", "readonly").objectStore("chunks").index("sid").openCursor(IDBKeyRange.only(id), "prev");
+    r.onsuccess = () => res(r.result && typeof r.result.value.seq === "number" ? r.result.value.seq + 1 : 0); r.onerror = () => res(0); } catch (e) { res(0); } });
 }
+
+let starting = false;
+async function startSession(resumeMeta) {
+  if (rec.on) { go("cox"); return; }
+  if (starting) return; starting = true; // v1.1: a double tap can no longer start two sessions
+  try {
+    try { await document.documentElement.requestFullscreen(); await screen.orientation.lock("landscape"); } catch (e) {}
+    rec.buf = []; rec.gps = []; rec.ev = []; sessErrs = 0; gps.last = null; drill.on = false; drill.n = 0;
+    if (resumeMeta) {
+      rec.id = resumeMeta.id; rec.t0 = resumeMeta.start; rec.meta = resumeMeta; rec.seq = Math.max(resumeMeta.seqNext || 0, db ? await nextSeq(resumeMeta.id) : 0);
+      rec.on = true; logEv({ type: "resume", gapFrom: resumeMeta.lastT || 0, version: VERSION }); gps.dist = resumeMeta.dist || 0;
+      const open = {}; (resumeMeta.events || []).forEach(e => { if (e.type === "drill_start") open[e.n] = 1; if (/^drill_(end|cancel|interrupted)$/.test(e.type)) delete open[e.n]; });
+      Object.keys(open).forEach(n => logEv({ type: "drill_interrupted", n: +n }));
+      if (resumeMeta.names && !Array.isArray(resumeMeta.names)) S.names = Object.assign({}, resumeMeta.names); if (resumeMeta.boatSize) S.size = resumeMeta.boatSize;
+    } else {
+      rec.id = "s" + Date.now(); rec.t0 = Date.now(); rec.seq = 0; gps.dist = 0;
+      rec.meta = { id: rec.id, start: rec.t0, status: "recording", version: VERSION, boat: S.rig.boat, boatSize: N(), seatNumbering: "1 = bow", rig: JSON.parse(JSON.stringify(S.rig)), names: Object.assign({}, S.names),
+        gates: gates.map(g => ({ ser: g.ser, seat: g.seat, side: g.side, cal: calOf(g.ser).pts, zero: g.zero, sim: !!g.sim })), events: [], strokes: 0, drills: 0 };
+      rec.on = true; S.lastRig = JSON.parse(JSON.stringify(S.rig)); S.lastGates = gates.filter(g => !g.sim).map(g => g.ser); saveS();
+      gates.forEach(g => { const n = S.names[g.seat]; if (n) logEv({ type: "rower", seat: g.seat, name: n }); });
+    }
+    await flush(); startGps(); keepAwake(); go("cox");
+  } finally { starting = false; }
+}
+let ending = false;
 async function endSession() {
+  if (!rec.on || ending) return;
   if (!(await ask("End session?", "Recording stops and the session is saved on this phone.", "End session"))) return;
-  if (drill.on) stopDrill(); logEv({ type: "end" }); rec.meta.status = "saved"; rec.meta.end = Date.now(); await flush(); rec.on = false;
-  try { screen.orientation.unlock(); } catch (e) {} try { if (document.fullscreenElement) await document.exitFullscreen(); } catch (e) {}
-  showEnd(rec.meta); go("end"); loadSessions();
+  if (!rec.on || ending) return; ending = true;
+  try {
+    if (drill.on) stopDrill(); logEv({ type: "end" }); rec.meta.status = "saved"; rec.meta.end = Date.now();
+    await flush(); if (rec.buf.length || rec.ev.length || rec.gps.length) await flush(); // second go if the first save failed
+    rec.on = false;
+    if (backTrap) { backTrap = false; try { history.back(); } catch (e) {} }
+    try { if (wake) { wake.release(); wake = null; } } catch (e) {}
+    try { screen.orientation.unlock(); } catch (e) {} try { if (document.fullscreenElement) await document.exitFullscreen(); } catch (e) {}
+    showEnd(rec.meta); go("end"); loadSessions();
+  } finally { ending = false; }
 }
 
 // ================= GPS =================
-const gps = { watch: null, last: null, dist: 0, speed: 0, acc: null, fixT: 0 };
+const gps = { watch: null, last: null, dist: 0, speed: 0, acc: null, fixT: 0, err: null };
 function startGps() {
   if (gps.watch !== null || !navigator.geolocation) return;
   gps.watch = navigator.geolocation.watchPosition(p => {
-    const c = p.coords, t = p.timestamp; gps.acc = c.accuracy; gps.fixT = Date.now();
+    const c = p.coords, t = p.timestamp; gps.acc = c.accuracy; gps.fixT = Date.now(); gps.err = null;
     if (rec.on) rec.gps.push([t - rec.t0, +c.latitude.toFixed(7), +c.longitude.toFixed(7), Math.round(c.accuracy), c.speed == null ? null : +c.speed.toFixed(2), c.heading == null ? null : Math.round(c.heading)]);
     if (gps.last && c.accuracy < 25) {
       const d = hav(gps.last.lat, gps.last.lon, c.latitude, c.longitude), dt = (t - gps.last.t) / 1000;
-      if (dt > 0 && d / dt < 9) { if (rec.on) gps.dist += d; const v = c.speed != null && c.speed >= 0 ? c.speed : d / dt; gps.speed = gps.speed ? gps.speed * .7 + v * .3 : v; }
+      // v1.1: distance only counts while moving (>= 0.5 m/s), so GPS wander at the pontoon doesn't add metres
+      if (dt > 0 && d / dt < 9) { const mv = c.speed != null && c.speed >= 0 ? c.speed : d / dt; if (rec.on && mv >= 0.5) gps.dist += d; const v = c.speed != null && c.speed >= 0 ? c.speed : d / dt; gps.speed = gps.speed ? gps.speed * .7 + v * .3 : v; }
     }
     if (c.accuracy < 25) gps.last = { lat: c.latitude, lon: c.longitude, t };
-  }, () => {}, { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 });
+  }, e => { gps.err = e && e.code; if (e && e.code === 1) noteErr("GPS permission denied", "gps"); }, { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 });
 }
 function hav(a, b, c, d) { const R = 6371000, r = Math.PI / 180, x = Math.sin((c - a) * r / 2) ** 2 + Math.cos(a * r) * Math.cos(c * r) * Math.sin((d - b) * r / 2) ** 2; return 2 * R * Math.asin(Math.sqrt(x)); }
 const fmtSplit = v => { if (!v || v < .7 || Date.now() - gps.fixT > 6000) return "--"; const s = 500 / v; return Math.floor(s / 60) + ":" + (s % 60).toFixed(1).padStart(4, "0"); };
@@ -423,9 +552,12 @@ let wake = null;
 async function keepAwake() { try { if (navigator.wakeLock && document.visibilityState === "visible") { wake = await navigator.wakeLock.request("screen"); } } catch (e) {} }
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "hidden") { logEv({ type: "hidden" }); flush(); }
-  else { logEv({ type: "visible" }); if (rec.on) keepAwake(); gates.forEach(g => { if (!g.conn) reconnect(g); }); }
+  else { logEv({ type: "visible" }); if (rec.on) keepAwake(); gates.forEach(g => { if (!g.conn && !g.sim) connectGate(g).then(ok => { if (ok) renderGates(); }); }); }
 });
 window.addEventListener("pagehide", () => { logEv({ type: "hidden" }); flush(); });
+// v1.1: Android back gesture on the cox screen would close the app mid-session; keep it on the cox screen instead
+let backTrap = false;
+window.addEventListener("popstate", () => { backTrap = false; if (rec.on && cur === "cox") { try { history.pushState({ boat: "cox" }, ""); backTrap = true; } catch (e) {} toast("Still recording. Tap End session to stop."); } });
 
 // ================= drills + rowers =================
 const drill = { on: false, n: 0, num: 0, start: 0, name: "" };
@@ -447,7 +579,7 @@ function addRecent(n) { if (!n) return; S.recent = [n, ...S.recent.filter(x => x
 
 // ================= rendering =================
 let cur = "home";
-function go(s) { cur = s; document.querySelectorAll(".scr").forEach(e => e.classList.toggle("on", e.id === "s-" + s)); if (s === "home") loadSessions(); if (s === "connect") renderGates(); if (s === "rig") renderRig(); if (s === "cal") renderCal(); if (s === "ready") renderReady(); if (s === "cox") { renderGateDots(); renderCoxMode(); } }
+function go(s) { cur = s; document.querySelectorAll(".scr").forEach(e => e.classList.toggle("on", e.id === "s-" + s)); if (s === "home") loadSessions(); if (s === "connect") renderGates(); if (s === "rig") renderRig(); if (s === "cal") renderCal(); if (s === "ready") renderReady(); if (s === "cox") { renderGateDots(); renderCoxMode(); if (!backTrap) { try { history.pushState({ boat: "cox" }, ""); backTrap = true; } catch (e) {} } } }
 document.addEventListener("click", e => { const b = e.target.closest("[data-go]"); if (b) { if (cur === "rig") readRig(); go(b.dataset.go); } });
 document.querySelectorAll(".steps").forEach(el => { const n = +el.dataset.step; el.innerHTML = ["Connect", "Rig", "Calibrate", "Start"].map((s, i) => `<div class="${i < n ? "done" : ""} ${i === n - 1 ? "cur" : ""}"><i></i>${s}</div>`).join(""); });
 
@@ -458,13 +590,15 @@ function renderGates() {
   const list = gates.slice().sort((a, b) => b.seat - a.seat).map(g => {
     const pill = g.conn ? '<span class="pill p-ok">Connected</span>' : '<span class="pill p-w">Reconnecting…</span>';
     return `<div class="card" style="display:flex;flex-direction:column;gap:8px;margin-bottom:8px">
-      <div class="row"><span class="dim" style="flex:1">Gate ${esc(g.ser)}${g.bat != null ? " · battery " + g.bat + "%" : ""}${g.sim ? " · simulated" : ""}</span>${pill}</div>
+      <div class="row"><span class="dim" style="flex:1">Gate ${esc(g.ser)}${g.bat != null ? " · battery " + g.bat + "%" : ""}${g.sim ? " · simulated" : ""}</span>${pill}<button data-rm="${esc(g.ser)}" aria-label="Remove gate ${esc(g.ser)}" style="min-height:36px;font-size:13px;padding:0 10px">Remove</button></div>
       <div class="row"><select data-seatsel="${esc(g.ser)}" aria-label="Seat for gate ${esc(g.ser)}" style="flex:1">${seatOpts(g.seat)}</select>
       <select data-sidesel="${esc(g.ser)}" aria-label="Side for gate ${esc(g.ser)}" style="flex:1"><option value="stroke" ${g.side === "stroke" ? "selected" : ""}>Stroke side</option><option value="bow" ${g.side === "bow" ? "selected" : ""}>Bow side</option></select></div>
       <label class="row" style="font-size:13px;font-weight:600;color:var(--dim)">Rower<input data-name="${g.seat}" value="${esc(S.names[g.seat] || "")}" placeholder="Type rower name" style="flex:1"></label></div>`;
   });
-  $("gateList").innerHTML = list.join("") + (gates.length < 4 ? `<div class="card dim" style="margin-bottom:8px">${4 - gates.length} more gate${gates.length === 3 ? "" : "s"} to add</div>` : "");
+  const want = Math.min(4, N());
+  $("gateList").innerHTML = list.join("") + (gates.length < want ? `<div class="card dim" style="margin-bottom:8px">${want - gates.length} more gate${want - gates.length === 1 ? "" : "s"} to add</div>` : "");
 }
+$("gateList").addEventListener("click", async e => { const b = e.target.closest("[data-rm]"); if (!b) return; if (await ask("Remove gate " + b.dataset.rm + "?", "It is disconnected and taken off its seat. You can add it again.", "Remove")) removeGate(b.dataset.rm); });
 $("gateList").addEventListener("input", e => { const i = e.target.dataset.name; if (i != null) { S.names[+i] = e.target.value.slice(0, 40); saveS(); } });
 $("gateList").addEventListener("change", e => {
   const ss = e.target.dataset.seatsel, sd = e.target.dataset.sidesel;
@@ -472,7 +606,16 @@ $("gateList").addEventListener("change", e => {
   if (ss) { const g = gates.find(x => x.ser === ss), ns = +e.target.value, o = gateOnSeat(ns); if (o && o !== g) { o.seat = g.seat; S.assign[o.ser] = { seat: o.seat, side: o.side }; } g.seat = ns; g.side = defaultSide(ns); S.assign[g.ser] = { seat: g.seat, side: g.side }; saveS(); renderGates(); }
   if (sd) { const g = gates.find(x => x.ser === sd); g.side = e.target.value; S.assign[g.ser] = { seat: g.seat, side: g.side }; saveS(); }
 });
-$("sizeSel").onclick = e => { const b = e.target.closest("[data-size]"); if (!b) return; S.size = +b.dataset.size; gates.forEach(g => { if (g.seat > N()) g.seat = N(); }); saveS(); renderGates(); };
+// v1.1: changing boat size no longer piles several gates onto the stroke seat
+$("sizeSel").onclick = e => {
+  const b = e.target.closest("[data-size]"); if (!b) return; const n = +b.dataset.size;
+  if (gates.length > n) { toast(`${gates.length} gates won't fit a ${n}. Remove ${gates.length - n} first.`); return; }
+  S.size = n; const used = new Set(), moved = [];
+  gates.slice().sort((a, b) => b.seat - a.seat).forEach(g => { if (g.seat > n || g.seat < 1 || used.has(g.seat)) moved.push(g); else used.add(g.seat); });
+  moved.forEach(g => { let x = n; while (used.has(x)) x--; g.seat = x; g.side = defaultSide(x); used.add(x); });
+  gates.forEach(g => { S.assign[g.ser] = { seat: g.seat, side: g.side }; });
+  saveS(); renderGates();
+};
 $("btnAdd").onclick = addGate; $("btnSim").onclick = startSim;
 
 function renderRig() {
@@ -524,14 +667,31 @@ $("btnZero").onclick = async () => {
 function renderReady() {
   const conn = gates.filter(g => g.conn), calOk = gates.filter(g => calOf(g.ser).own), named = gates.filter(g => S.names[g.seat]), r = S.rig;
   const items = [
-    [conn.length >= 4, `${conn.length} of 4 gates connected`, gates.map(g => `${seatLabel(g.seat)} ${g.bat != null ? g.bat + "%" : ""}`).join(" · ") || "Go back and add gates"],
+    [conn.length >= Math.min(4, N()) && conn.length === gates.length, `${conn.length} of ${Math.max(gates.length, Math.min(4, N()))} gates connected`, gates.map(g => `${seatLabel(g.seat)} ${g.bat != null ? g.bat + "%" : ""}`).join(" · ") || "Go back and add gates"],
     [calOk.length >= gates.length && gates.length > 0, `${calOk.length} of ${gates.length} gates calibrated`, calOk.length < gates.length ? "Uncalibrated gates use a default, so angles are approximate" : "Saved per gate"],
     [named.length >= gates.length && gates.length > 0, `${named.length} of ${gates.length} rowers named`, gateSeats().map(i => `${seatLabel(i)} ${S.names[i] || "—"}`).join(" · ")],
     [!!(r.boat || r.oar || r.inb), "Rig recorded", [r.boat, r.oar && "oar " + r.oar, r.inb && "inboard " + r.inb].filter(Boolean).join(" · ") || "Optional, but helps the analysis"],
     [gps.acc != null && gps.acc < 25, "GPS", gps.acc != null ? "Accurate to about " + Math.round(gps.acc) + " m" : "Waiting for a fix (can take a minute without data)"]
   ];
+  renderLiveGates();
   $("checks").innerHTML = items.map(([ok, t, d]) => `<div class="check">${ok ? '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="#81c784" stroke-width="2.6"><path d="M5 12l5 5 9-10"/></svg>' : '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="#ffb74d" stroke-width="2.4"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg>'}<div><b>${esc(t)}</b><span class="dim">${esc(d)}</span></div></div>`).join("");
   startGps();
+}
+// v1.1: live row per gate on the Ready screen (seat, rower, angle, force), updated 5x a second
+function renderLiveGates() {
+  $("liveCard").style.display = gates.length ? "" : "none";
+  $("liveGates").innerHTML = gateSeats().map(i => { const g = gateOnSeat(i); return `<div class="lg" id="lg-${esc(g.ser)}"><b style="font-size:14px">${seatLabel(i)}<span class="dim" style="display:block;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(S.names[i] || g.side + " side")}</span></b><div class="bar"><i></i></div><span class="num" style="font-size:20px;text-align:right" data-a>--</span><span class="num" style="font-size:20px;text-align:right" data-f>--</span></div>`; }).join("");
+  updateLiveGates(); // fill straight away so a re-render never flashes "--"
+}
+function updateLiveGates() {
+  gates.forEach(g => {
+    const row = $("lg-" + g.ser); if (!row) return; const fresh = g.conn && g.angle != null && Date.now() - g.last < 2000;
+    if (g.prevA == null || Date.now() - (g.prevAT || 0) > 600) { g.mv = fresh && g.prevA != null && Math.abs(g.angle - g.prevA) > 2; g.prevA = fresh ? g.angle : null; g.prevAT = Date.now(); }
+    row.classList.toggle("off", !fresh); row.classList.toggle("mv", !!(fresh && g.mv));
+    row.querySelector("[data-a]").textContent = fresh ? (g.angle > 0 ? "+" : "") + g.angle.toFixed(0) + "°" : g.conn ? "no data" : "off";
+    row.querySelector("[data-f]").textContent = fresh && g.force != null ? String(g.force) : "--";
+    row.querySelector(".bar i").style.left = fresh ? Math.max(0, Math.min(100, 50 + g.angle * 50 / 70)).toFixed(1) + "%" : "50%";
+  });
 }
 $("btnStart").onclick = async () => { if (!gates.length) { if (!(await ask("No gates connected", "Start anyway? Only GPS split and rate from GPS will be recorded.", "Start"))) return; } startSession(); };
 
@@ -560,7 +720,7 @@ setInterval(() => {
     const g = refGate(), rate = g && g.lastCycle && Date.now() - g.lastCatchT < 8000 ? Math.round(60 / g.lastCycle) : null, sp = fmtSplit(gps.speed);
     $("vSplit").textContent = sp; $("vSplit2").textContent = sp; $("vRate").textContent = rate || "--"; $("vRate2").textContent = rate || "--";
     $("vDist").textContent = Math.round(gps.dist).toLocaleString(); $("vStk").textContent = rec.meta ? rec.meta.strokes || 0 : 0; $("vDrillN").textContent = drill.n;
-    $("vGps").textContent = gps.acc == null ? "GPS…" : Date.now() - gps.fixT > 6000 ? "GPS lost" : "GPS ±" + Math.round(gps.acc) + " m";
+    $("vGps").textContent = gps.err === 1 ? "GPS off" : gps.acc == null ? "GPS…" : Date.now() - gps.fixT > 6000 ? "GPS lost" : "GPS ±" + Math.round(gps.acc) + " m";
     const off = gates.filter(g => !g.conn || Date.now() - g.last > 3000);
     $("warnBar").classList.toggle("on", off.length > 0 && gates.length > 0);
     $("warnBar").textContent = off.length ? off.map(g => seatLabel(g.seat)).join(", ") + " gate not sending · reconnecting (still recording the others)" : "";
@@ -568,6 +728,7 @@ setInterval(() => {
     $("btnAddCox").style.display = gates.filter(g => g.conn).length < 4 && navigator.bluetooth ? "" : "none";
   }
   if (cur === "cal") { const g = gateOnSeat(calSeat); $("calDeg").textContent = g && g.angle != null && Date.now() - g.last < 2000 ? (g.angle > 0 ? "+" : "") + g.angle.toFixed(1) + "°" : "--"; $("fNow").textContent = g && g.force != null ? g.force : "--"; }
+  if (cur === "ready") { updateLiveGates(); if (Math.random() < .1 && !$("m-confirm").classList.contains("on")) renderReady(); }
   if (cur === "connect" && Math.random() < .2 && !$("gateList").contains(document.activeElement)) renderGates();
 }, 200);
 
@@ -583,11 +744,16 @@ async function loadSessions() {
     <div class="dim">${dur} min · ${((s.dist || 0) / 1000).toFixed(1)} km · ${s.strokes || 0} strokes · ${s.drills || 0} drills</div><button data-exp="${esc(s.id)}" style="width:100%;margin-top:8px">Export file</button></div>`; }).join("") || '<div class="dim">None yet.</div>';
 }
 $("sessList").onclick = e => { const b = e.target.closest("[data-exp]"); if (b) exportSession(b.dataset.exp); };
-async function exportSession(id) {
-  const meta = (await allSessions()).find(s => s.id === id); if (!meta) return;
+async function buildExport(id) {
+  const meta = (await allSessions()).find(s => s.id === id); if (!meta) return null;
   const chunks = (await tx("chunks", "readonly", s => s.index("sid").getAll(id))) || []; chunks.sort((a, b) => a.seq - b.seq);
-  const out = { format: "cbhs-boat-recorder/1", meta, packetFields: ["t_ms", "seat", "clock", "force_raw", "angle_raw", "ang_vel"], gpsFields: ["t_ms", "lat", "lon", "acc_m", "speed_ms", "heading"],
-    packets: [].concat(...chunks.map(c => c.p)), gps: [].concat(...chunks.map(c => c.g)), events: [].concat(...chunks.map(c => c.e)) };
+  const packets = [], gpsOut = [], events = []; chunks.forEach(c => { for (const x of c.p || []) packets.push(x); for (const x of c.g || []) gpsOut.push(x); for (const x of c.e || []) events.push(x); });
+  return { format: "cbhs-boat-recorder/1", exportedBy: VERSION, meta, packetFields: ["t_ms", "seat", "clock", "force_raw", "angle_raw", "ang_vel"], gpsFields: ["t_ms", "lat", "lon", "acc_m", "speed_ms", "heading"],
+    chunks: chunks.length, packets, gps: gpsOut, events };
+}
+async function exportSession(id) {
+  let out; try { out = await buildExport(id); } catch (e) { noteErr("Export: " + e.message, "export"); toast("Export failed: " + e.message); return; }
+  if (!out) { toast("Session not found"); return; } const meta = out.meta;
   const a = document.createElement("a"), d = new Date(meta.start);
   a.href = URL.createObjectURL(new Blob([JSON.stringify(out)], { type: "application/json" }));
   a.download = `session-${d.toISOString().slice(0, 16).replace(/[:T]/g, "")}${meta.boat ? "-" + meta.boat.replace(/\W+/g, "") : ""}.json`; a.click();
@@ -601,7 +767,8 @@ function showEnd(m) {
   let tl = "", open = {}, hid = null;
   evs.forEach(e => { if (e.type === "drill_start") open[e.n] = e.t; if (e.type === "drill_end" && open[e.n] != null) { tl += `<i style="left:${pc(open[e.n])};width:${pc(e.t - open[e.n])}">${e.n}</i>`; }
     if (e.type === "rower" && e.t > 2000) tl += `<b style="left:${pc(e.t)}" title="${esc(seatLabel(e.seat) + ": " + e.name)}"></b>`;
-    if (e.type === "hidden") hid = e.t; if ((e.type === "visible" || e.type === "resume") && hid != null) { tl += `<s style="left:${pc(hid)};width:${pc(e.t - hid)}"></s>`; hid = null; } });
+    if (e.type === "resume" && hid == null && e.gapFrom != null) hid = e.gapFrom; // app was killed without a "hidden" event
+    if (e.type === "hidden") hid = e.t; if ((e.type === "visible" || e.type === "resume") && hid != null) { tl += `<s style="left:${pc(hid)};width:${pc(Math.max(0, e.t - hid))}"></s>`; hid = null; } });
   $("endTl").innerHTML = tl;
   const ds = evs.filter(e => e.type === "drill_end");
   $("endDrills").innerHTML = ds.map(e => `<div class="check"><span class="k" style="width:26px;height:26px;border-radius:7px;background:var(--drill);color:#2a1700;display:grid;place-items:center;font-weight:700">${e.n}</span><b style="flex:1">${esc(e.name || "Drill " + e.n)}</b><span class="dim">${e.strokes} strokes</span></div>`).join("")
@@ -626,6 +793,26 @@ $("restoreFile").onchange = async e => {
   e.target.value = "";
 };
 $("verTxt").textContent = "Version " + VERSION;
+// v1.1: Copy diagnostics: plain text for pasting into a chat
+async function diagText() {
+  const L = [], ago = t => t ? Math.round((Date.now() - t) / 1000) + " s ago" : "never";
+  L.push("Boat Recorder " + VERSION, "Time " + new Date().toString(), "Browser " + navigator.userAgent, "Screen " + cur + (rec.on ? " · RECORDING " + rec.id : "") + " · boat size " + N());
+  L.push("Bluetooth " + (navigator.bluetooth ? "yes" + (navigator.bluetooth.getDevices ? " (getDevices ok)" : " (no getDevices)") : "NO"));
+  L.push("Gates (" + gates.length + "):");
+  gates.slice().sort((a, b) => b.seat - a.seat).forEach(g => L.push(`  ${seatLabel(g.seat)} seat ${g.seat} · ${g.side} side · gate ${g.ser}${g.sim ? " (sim)" : ""} · ${g.conn ? "connected" : g.connecting ? "connecting" : "NOT connected"} · last data ${ago(g.last)} · battery ${g.bat == null ? "?" : g.bat + "%"} · cal ${calOf(g.ser).own ? "own" : "default"} · drops ${g.drops || 0}`));
+  L.push(`GPS ${gps.err ? "error " + gps.err : gps.acc == null ? "no fix" : "±" + Math.round(gps.acc) + " m, fix " + ago(gps.fixT)}`);
+  try { if (navigator.storage && navigator.storage.estimate) { const e = await navigator.storage.estimate(); L.push(`Storage used ${(e.usage / 1e6).toFixed(1)} MB of ${(e.quota / 1e6).toFixed(0)} MB`); } else L.push("Storage estimate unavailable"); } catch (e) { L.push("Storage estimate failed"); }
+  try { const ss = await allSessions(); L.push(`Sessions ${ss.length} (${ss.filter(s => s.status === "recording").length} unfinished)` + (db ? "" : " · DATABASE NOT OPEN")); } catch (e) { L.push("Sessions: " + e.message); }
+  L.push("Last errors (" + ERRS.length + "):"); ERRS.slice(-20).forEach(e => L.push(`  ${new Date(e.at).toLocaleString("en-NZ")} [${e.src}]${e.n > 1 ? " x" + e.n : ""} ${e.msg}`)); if (!ERRS.length) L.push("  none");
+  return L.join("\n");
+}
+$("btnDiag").onclick = async () => {
+  const t = await diagText(); let ok = false;
+  try { await navigator.clipboard.writeText(t); ok = true; } catch (e) {}
+  if (!ok) { try { const ta = document.createElement("textarea"); ta.value = t; ta.style.position = "fixed"; ta.style.opacity = "0"; document.body.appendChild(ta); ta.select(); ok = document.execCommand && document.execCommand("copy"); ta.remove(); } catch (e) {} }
+  toast(ok ? "Diagnostics copied. Paste them into a chat." : "Couldn't copy. Long-press to copy from the box.");
+  if (!ok) { $("mcTitle").textContent = "Diagnostics"; $("mcText").textContent = t; $("mcText").style.whiteSpace = "pre-wrap"; $("mcText").style.userSelect = "text"; $("mcYes").textContent = "Close"; $("mcYes").onclick = $("mcNo").onclick = () => $("m-confirm").classList.remove("on"); $("m-confirm").classList.add("on"); }
+};
 
 // ================= boot =================
 (async () => {
